@@ -1,4 +1,27 @@
-import { Video } from "lucide-react";
-export default function Brand({ small = false }: { small?: boolean }) {
-  return <div className="brand"><span className="brand-mark"><Video size={small ? 17 : 20} /></span><span>Aura<span className="brand-accent">Clave</span></span></div>;
+export default function Brand({
+  small = false,
+  showTagline = false
+}: {
+  small?: boolean;
+  showTagline?: boolean;
+}) {
+  return (
+    <div className={`brand ${small ? "brand-small" : ""}`}>
+      <span className="brand-mark-wrap">
+        <img
+          src="/assets/app-icon-clean.png"
+          alt="AuraClave Logo"
+          className="brand-logo-img"
+        />
+      </span>
+      <div className="brand-text-col">
+        <span className="brand-title">
+          Aura<span className="brand-accent">Clave</span>
+        </span>
+        {showTagline && (
+          <span className="brand-tagline">Connect Without Limits.</span>
+        )}
+      </div>
+    </div>
+  );
 }

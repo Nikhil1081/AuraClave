@@ -21,3 +21,11 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# Firebase cache
+.firebase/
+**/.firebase/
+
+# Archives
+*.zip
+*.tar.gz
