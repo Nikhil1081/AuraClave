@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from "@livekit/components-react";
 import { ArrowLeft, LoaderCircle, Video } from "lucide-react";
 import Brand from "../components/Brand";
+import MeetingExtensions from "../components/MeetingExtensions";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function Meeting() {
@@ -38,5 +39,5 @@ export default function Meeting() {
   if (loading) return <div className="loading-screen"><LoaderCircle className="spin"/> Preparing your meeting…</div>;
   if (error) return <div className="center-page"><div className="setup-card"><Brand/><h2>Unable to join</h2><p className="muted">{error}</p><Link className="button primary full" to="/dashboard">Back to dashboard</Link></div></div>;
 
-  return <div className="meeting-page"><header className="meeting-header"><Link to="/dashboard" className="meeting-brand"><Brand small/><span className="meeting-divider"/> <span className="meeting-room-label">Meeting room</span></Link><div className="meeting-room-id"><span className="status-dot"/> {roomName}</div></header><div className="meeting-content"><LiveKitRoom video audio token={token} serverUrl={serverUrl} connect onDisconnected={()=>{}} data-lk-theme="default" className="livekit-room"><VideoConference/><RoomAudioRenderer/></LiveKitRoom></div></div>;
+  return <div className="meeting-page"><header className="meeting-header"><Link to="/dashboard" className="meeting-brand"><Brand small/><span className="meeting-divider"/> <span className="meeting-room-label">Meeting room</span></Link><div className="meeting-room-id"><span className="status-dot"/> {roomName}</div></header><div className="meeting-content"><LiveKitRoom video audio token={token} serverUrl={serverUrl} connect onDisconnected={()=>{}} data-lk-theme="default" className="livekit-room"><VideoConference/><RoomAudioRenderer/><MeetingExtensions roomName={roomName} /></LiveKitRoom></div></div>;
 }

@@ -1,0 +1,473 @@
+import { useEffect, useRef, useState } from "react";
+import { useRoomContext } from "@livekit/components-react";
+import { RoomEvent } from "livekit-client";
+import {
+  Subtitles,
+  CircleDot,
+  Square,
+  Sparkles,
+  X,
+  Copy,
+  Check,
+  Download,
+  LoaderCircle
+} from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+
+interface CaptionItem {
+  speaker: string;
+  text: string;
+  time: string;
+}
+
+export default function MeetingExtensions({ roomName }: { roomName: string }) {
+  const room = useRoomContext();
+  const { session, user } = useAuth();
+
+  // Captions state
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [currentCaption, setCurrentCaption] = useState<{ speaker: string; text: string } | null>(null);
+  const [transcript, setTranscript] = useState<CaptionItem[]>([]);
+  const recognitionRef = useRef<any>(null);
+  const captionTimeoutRef = useRef<any>(null);
+
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const timerIntervalRef = useRef<any>(null);
+
+  // AI Summary Modal state
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  // 1. LiveKit Data Channel listener for remote captions
+  useEffect(() => {
+    if (!room) return;
+
+    const handleData = (payload: Uint8Array, participant?: any) => {
+      try {
+        const text = new TextDecoder().decode(payload);
+        const data = JSON.parse(text);
+        if (data.type === "caption") {
+          const speakerName = data.speaker || participant?.name || "Participant";
+          setCurrentCaption({ speaker: speakerName, text: data.text });
+
+          setTranscript((prev) => [
+            ...prev,
+            {
+              speaker: speakerName,
+              text: data.text,
+              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            }
+          ]);
+
+          if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
+          captionTimeoutRef.current = setTimeout(() => {
+            setCurrentCaption(null);
+          }, 4500);
+        }
+      } catch (err) {
+        console.error("Error decoding caption packet", err);
+      }
+    };
+
+    room.on(RoomEvent.DataReceived, handleData);
+    return () => {
+      room.off(RoomEvent.DataReceived, handleData);
+    };
+  }, [room]);
+
+  // 2. Web Speech Recognition for local user
+  useEffect(() => {
+    if (!captionsEnabled) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Live captions: Speech recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.");
+      setCaptionsEnabled(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let final = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          final += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+
+      const spokenText = (final || interim).trim();
+      if (!spokenText) return;
+
+      const myName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "You";
+
+      setCurrentCaption({ speaker: myName, text: spokenText });
+
+      if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
+      captionTimeoutRef.current = setTimeout(() => {
+        setCurrentCaption(null);
+      }, 4500);
+
+      // If final sentence, broadcast to all participants and store in transcript
+      if (final.trim()) {
+        const payload = JSON.stringify({
+          type: "caption",
+          speaker: myName,
+          text: final.trim()
+        });
+        const encoded = new TextEncoder().encode(payload);
+
+        try {
+          room.localParticipant.publishData(encoded, { reliable: true });
+        } catch (e) {
+          console.warn("Could not publish caption data", e);
+        }
+
+        setTranscript((prev) => [
+          ...prev,
+          {
+            speaker: myName,
+            text: final.trim(),
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          }
+        ]);
+      }
+    };
+
+    recognition.onerror = (e: any) => {
+      if (e.error !== "no-speech") {
+        console.warn("Speech recognition error:", e.error);
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if user still has captions enabled
+      if (captionsEnabled) {
+        try {
+          recognition.start();
+        } catch {}
+      }
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (e) {
+      console.warn("Failed to start speech recognition", e);
+    }
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch {}
+    };
+  }, [captionsEnabled, room, user]);
+
+  // 3. Meeting Recording (MediaRecorder API)
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+
+      let mimeType = "video/webm;codecs=vp9,opus";
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = "video/webm";
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      recordedChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        clearInterval(timerIntervalRef.current);
+        setRecordingSeconds(0);
+        setIsRecording(false);
+
+        // Stop all tracks in display stream
+        stream.getTracks().forEach((track) => track.stop());
+
+        const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+        if (blob.size === 0) return;
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.download = `AuraClave-${roomName}-${timestamp}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      // Listen for user clicking "Stop Sharing" on the browser popup
+      stream.getVideoTracks()[0].onended = () => {
+        if (mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+      };
+
+      mediaRecorder.start(1000);
+      mediaRecorderRef.current = mediaRecorder;
+      setIsRecording(true);
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingSeconds((sec) => sec + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error("Recording error:", err);
+      if (err.name !== "NotAllowedError") {
+        alert("Could not start recording: " + (err?.message || "Permission denied"));
+      }
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // 4. Generate AI Summary with Groq
+  const generateSummary = async () => {
+    if (transcript.length === 0) {
+      setAiError("No meeting transcript recorded yet. Turn on Live Captions or speak first!");
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError("");
+
+    try {
+      const fullText = transcript
+        .map((item) => `[${item.time}] ${item.speaker}: ${item.text}`)
+        .join("\n");
+
+      const apiUrl = import.meta.env.VITE_API_URL
+        ? `${import.meta.env.VITE_API_URL}/api/ai`
+        : "/api/ai";
+
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`
+        },
+        body: JSON.stringify({
+          text: fullText,
+          task: "summarize"
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to generate AI summary.");
+      }
+
+      setAiSummary(data.result || "No summary generated.");
+    } catch (err: any) {
+      setAiError(err.message || "Failed to contact AI service.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const copySummary = () => {
+    navigator.clipboard.writeText(aiSummary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadTranscript = () => {
+    const content = transcript
+      .map((item) => `[${item.time}] ${item.speaker}: ${item.text}`)
+      .join("\n");
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `AuraClave-Transcript-${roomName}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <>
+      {/* Top Floating Action Bar */}
+      <div className="meeting-custom-bar">
+        {/* Recording Button */}
+        {isRecording ? (
+          <button
+            className="action-pill recording-active"
+            onClick={stopRecording}
+            title="Stop and save recording"
+          >
+            <Square size={13} fill="#ff4d6d" color="#ff4d6d" />
+            <span className="rec-text">REC {formatTimer(recordingSeconds)}</span>
+          </button>
+        ) : (
+          <button
+            className="action-pill"
+            onClick={startRecording}
+            title="Record meeting (Audio & Video)"
+          >
+            <CircleDot size={15} color="#fa5252" />
+            <span>Record</span>
+          </button>
+        )}
+
+        {/* Live Captions Toggle */}
+        <button
+          className={`action-pill ${captionsEnabled ? "captions-active" : ""}`}
+          onClick={() => setCaptionsEnabled(!captionsEnabled)}
+          title={captionsEnabled ? "Turn off live captions" : "Turn on live captions"}
+        >
+          <Subtitles size={15} />
+          <span>{captionsEnabled ? "CC On" : "CC"}</span>
+        </button>
+
+        {/* AI Meeting Summary */}
+        <button
+          className="action-pill ai-pill"
+          onClick={() => setShowAiModal(true)}
+          title="Open AI Meeting Notes & Summary"
+        >
+          <Sparkles size={15} />
+          <span>AI Notes</span>
+        </button>
+      </div>
+
+      {/* Subtitles Overlay Banner (Bottom Center) */}
+      {currentCaption && (
+        <div className="subtitles-banner">
+          <span className="caption-speaker">{currentCaption.speaker}:</span>
+          <span className="caption-text">{currentCaption.text}</span>
+        </div>
+      )}
+
+      {/* AI Summary / Transcript Modal */}
+      {showAiModal && (
+        <div className="modal-backdrop" onClick={() => setShowAiModal(false)}>
+          <div className="ai-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                <Sparkles size={18} color="#8aa5ff" />
+                <span>AuraClave AI Meeting Assistant</span>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() => setShowAiModal(false)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {/* Transcript Preview */}
+              <div className="transcript-section">
+                <div className="section-head">
+                  <b>Live Transcript ({transcript.length} lines)</b>
+                  {transcript.length > 0 && (
+                    <button
+                      className="text-btn"
+                      onClick={downloadTranscript}
+                      title="Download transcript as text"
+                    >
+                      <Download size={13} /> Export
+                    </button>
+                  )}
+                </div>
+                <div className="transcript-box">
+                  {transcript.length === 0 ? (
+                    <div className="empty-state">
+                      No speech recorded yet. Make sure <b>CC</b> (Captions) is enabled and speak into your mic!
+                    </div>
+                  ) : (
+                    transcript.map((item, idx) => (
+                      <div key={idx} className="transcript-line">
+                        <span className="t-time">{item.time}</span>
+                        <b className="t-speaker">{item.speaker}:</b>
+                        <span className="t-text">{item.text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Generate Button */}
+              <button
+                className="button primary full generate-btn"
+                onClick={generateSummary}
+                disabled={aiLoading || transcript.length === 0}
+              >
+                {aiLoading ? (
+                  <>
+                    <LoaderCircle size={16} className="spin" /> Generating AI Summary with Groq…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} /> Generate Meeting Summary & Action Items
+                  </>
+                )}
+              </button>
+
+              {aiError && <div className="notice error-notice">{aiError}</div>}
+
+              {/* AI Result Box */}
+              {aiSummary && (
+                <div className="summary-result-box">
+                  <div className="result-head">
+                    <b>AI Meeting Summary</b>
+                    <button className="text-btn" onClick={copySummary}>
+                      {copied ? <Check size={14} color="#56d6a0" /> : <Copy size={14} />}
+                      {copied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <div className="summary-markdown">{aiSummary}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
