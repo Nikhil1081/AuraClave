@@ -14,7 +14,7 @@ app.use(express.json());
 
 // Health check endpoint for Render
 app.get("/", (_req: Request, res: Response) => {
-  res.json({ status: "ok", service: "NexMeet API", timestamp: new Date().toISOString() });
+  res.json({ status: "ok", service: "AuraClave API", timestamp: new Date().toISOString() });
 });
 
 app.get("/health", (_req: Request, res: Response) => {
@@ -38,7 +38,7 @@ app.post("/api/token", async (req: Request, res: Response) => {
 
     const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
       identity: user.id,
-      name: user.user_metadata?.full_name || user.email || "NexMeet guest",
+      name: user.user_metadata?.full_name || user.email || "AuraClave guest",
       ttl: "2h"
     });
 
@@ -99,5 +99,5 @@ app.post("/api/ai", async (req: Request, res: Response) => {
 });
 
 app.listen(port, () => {
-  console.log(`NexMeet backend running on port ${port}`);
+  console.log(`AuraClave backend running on port ${port}`);
 });

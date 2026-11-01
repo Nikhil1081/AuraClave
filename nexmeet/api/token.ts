@@ -20,7 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
       identity: user.id,
-      name: user.user_metadata?.full_name || user.email || "NexMeet guest",
+      name: user.user_metadata?.full_name || user.email || "AuraClave guest",
       ttl: "2h"
     });
 
