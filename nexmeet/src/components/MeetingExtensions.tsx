@@ -13,6 +13,8 @@ import {
   LoaderCircle
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { useLanguage, SUPPORTED_LANGUAGES } from "../contexts/LanguageContext";
+import LanguageSelector from "./LanguageSelector";
 
 interface CaptionItem {
   speaker: string;
@@ -23,6 +25,7 @@ interface CaptionItem {
 export default function MeetingExtensions({ roomName }: { roomName: string }) {
   const room = useRoomContext();
   const { session, user } = useAuth();
+  const { language, t, currentSpeechCode } = useLanguage();
 
   // Captions state
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
@@ -106,7 +109,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = currentSpeechCode;
 
     recognition.onresult = (event: any) => {
       let interim = "";
@@ -185,7 +188,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
         recognition.stop();
       } catch {}
     };
-  }, [captionsEnabled, room, user]);
+  }, [captionsEnabled, room, user, currentSpeechCode]);
 
   // 3. Meeting Recording (MediaRecorder API)
   const startRecording = async () => {
@@ -276,9 +279,14 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
     setAiError("");
 
     try {
-      const fullText = transcript
-        .map((item) => `[${item.time}] ${item.speaker}: ${item.text}`)
-        .join("\n");
+      const langName = SUPPORTED_LANGUAGES.find((l) => l.code === language)?.label || "English";
+      const fullText =
+        transcript
+          .map((item) => `[${item.time}] ${item.speaker}: ${item.text}`)
+          .join("\n") +
+        (language !== "en"
+          ? `\n\n(IMPORTANT: Please format and write the meeting summary and action items in ${langName})`
+          : "");
 
       const apiUrl = import.meta.env.VITE_API_URL
         ? `${import.meta.env.VITE_API_URL}/api/ai`
@@ -332,6 +340,8 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
     <>
       {/* Top Floating Action Bar */}
       <div className="meeting-custom-bar">
+        <LanguageSelector compact />
+
         {/* Recording Button */}
         {isRecording ? (
           <button
@@ -349,7 +359,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
             title="Record meeting (Audio & Video)"
           >
             <CircleDot size={15} color="#fa5252" />
-            <span>Record</span>
+            <span>{t("meeting_record")}</span>
           </button>
         )}
 
@@ -360,7 +370,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
           title={captionsEnabled ? "Turn off live captions" : "Turn on live captions"}
         >
           <Subtitles size={15} />
-          <span>{captionsEnabled ? "CC On" : "CC"}</span>
+          <span>{captionsEnabled ? t("meeting_captions_on") : t("meeting_captions")}</span>
         </button>
 
         {/* AI Meeting Summary */}
@@ -370,7 +380,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
           title="Open AI Meeting Notes & Summary"
         >
           <Sparkles size={15} />
-          <span>AI Notes</span>
+          <span>{t("meeting_ai_notes")}</span>
         </button>
       </div>
 
