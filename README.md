@@ -191,6 +191,25 @@ Open your browser at **`http://localhost:5173`** and create your first meeting r
 - **Signaling & AI API**: Hosted on Render  
   👉 `https://auraclave-api.onrender.com`
 
+### LiveKit SFU setup
+
+AuraWeave now uses LiveKit Community Edition as its media SFU. The LiveKit server
+must run separately from the Render API on a host that supports TCP and UDP
+WebRTC ports. The repository includes [`docker-compose.livekit.yml`](./docker-compose.livekit.yml)
+and [`livekit.yaml`](./livekit.yaml) for a self-hosted deployment.
+
+Set these values on both the LiveKit host and the Render API:
+
+```text
+LIVEKIT_URL=wss://your-livekit-host.example.com
+LIVEKIT_API_KEY=your-generated-key
+LIVEKIT_API_SECRET=your-generated-secret
+```
+
+Do not expose `LIVEKIT_API_SECRET` to Firebase or frontend code. Until these
+variables point to a running LiveKit server, the API will return
+`LiveKit SFU is not configured on the server` and meetings will not connect.
+
 ---
 
 ## 📁 Repository Directory Overview
