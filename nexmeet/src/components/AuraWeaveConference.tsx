@@ -746,23 +746,44 @@ function RemoteStagePeerTile({
   onDemote: () => void;
 }) {
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
-  const showVideo = peer.stream && !peer.isVideoMuted;
+  const showVideo = Boolean(peer.stream && !peer.isVideoMuted);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Dedicated background audio pipeline: guarantees remote voice is always heard even when video is off
+  useEffect(() => {
+    if (audioRef.current && peer.stream) {
+      if (audioRef.current.srcObject !== peer.stream) {
+        audioRef.current.srcObject = peer.stream;
+      }
+      audioRef.current.play().catch((err) => {
+        console.warn("Audio autoplay blocked by browser policy, user interaction required:", err);
+      });
+    }
+  }, [peer.stream]);
+
+  // Video playback
+  useEffect(() => {
+    if (videoRef.current && peer.stream) {
+      if (videoRef.current.srcObject !== peer.stream) {
+        videoRef.current.srcObject = peer.stream;
+      }
+      if (showVideo) {
+        videoRef.current.play().catch(() => {});
+      }
+    }
+  }, [peer.stream, showVideo]);
 
   return (
     <div className="auraweave-tile remote-tile">
+      {/* Background audio pipeline: guarantees 100% audio transmission regardless of video visibility */}
+      <audio ref={audioRef} autoPlay playsInline />
+
       <video
-        ref={(el) => {
-          if (el) {
-            if (el.srcObject !== peer.stream) {
-              el.srcObject = peer.stream || null;
-            }
-            if (peer.stream && showVideo) {
-              el.play().catch(() => {});
-            }
-          }
-        }}
+        ref={videoRef}
         autoPlay
         playsInline
+        muted
         style={{ display: showVideo ? "block" : "none" }}
         className={`tile-video ${peer.isScreenSharing ? "screen" : ""}`}
       />

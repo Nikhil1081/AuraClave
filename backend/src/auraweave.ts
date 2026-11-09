@@ -64,8 +64,8 @@ export class AuraWeaveSignaler {
 
               const isFirst = room.size === 0;
 
-              // First participant or designated host gets "host" / "presenter" role, others start in "audience"
-              const assignedRole: AuraRole = isHost || isFirst ? "host" : "audience";
+              // Everyone has full speaking, video, and screen share permissions by default
+              const assignedRole: AuraRole = isHost || isFirst ? "host" : "presenter";
 
               const participant: AuraWeaveParticipant = {
                 ws,
@@ -76,8 +76,8 @@ export class AuraWeaveSignaler {
                 roomName,
                 role: assignedRole,
                 raisedHand: false,
-                isAudioMuted: assignedRole === "audience",
-                isVideoMuted: assignedRole === "audience",
+                isAudioMuted: false,
+                isVideoMuted: false,
                 isScreenSharing: false,
                 lastPing: Date.now()
               };
@@ -131,19 +131,17 @@ export class AuraWeaveSignaler {
               // 2. Broadcast updated room status and presence to all participants
               this.broadcastRoomSummary(roomName);
 
-              // 3. Notify stage peers if a new presenter/host joined
-              if (assignedRole !== "audience") {
-                this.broadcast(roomName, currentPeerId, {
-                  type: "stage-member-added",
-                  data: {
-                    peerId: currentPeerId,
-                    userId: participant.userId,
-                    name: participant.name,
-                    avatarUrl: participant.avatarUrl,
-                    role: assignedRole
-                  }
-                });
-              }
+              // 3. Notify stage peers that a participant joined with full speaking & video permissions
+              this.broadcast(roomName, currentPeerId, {
+                type: "stage-member-added",
+                data: {
+                  peerId: currentPeerId,
+                  userId: participant.userId,
+                  name: participant.name,
+                  avatarUrl: participant.avatarUrl,
+                  role: assignedRole
+                }
+              });
               break;
             }
 

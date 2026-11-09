@@ -50,8 +50,10 @@ export function useAuraWeave({
   user: { id: string; name: string; avatarUrl?: string } | null;
   isHost: boolean;
 }) {
-  const [role, setRole] = useState<AuraRole>(isHost ? "host" : "audience");
+  // Everyone has full speaking, video, and screen sharing permissions by default
+  const [role, setRole] = useState<AuraRole>(isHost ? "host" : "presenter");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [mediaReady, setMediaReady] = useState(false);
   const [peers, setPeers] = useState<Map<string, AuraWeavePeer>>(new Map());
   const [audienceCount, setAudienceCount] = useState<number>(0);
   const [totalParticipants, setTotalParticipants] = useState<number>(1);
@@ -74,21 +76,11 @@ export function useAuraWeave({
 
   const isStageMember = role === "host" || role === "presenter";
 
-  // 1. Initialize Local Media only when on Stage (Host / Presenter)
+  // 1. Initialize Local Media (Camera & Microphone) for All Participants
   useEffect(() => {
     let active = true;
 
     async function initMedia() {
-      if (!isStageMember) {
-        // Audience members do not publish camera or microphone
-        if (localStreamRef.current) {
-          localStreamRef.current.getTracks().forEach((t) => t.stop());
-          localStreamRef.current = null;
-          setLocalStream(null);
-        }
-        return;
-      }
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -125,8 +117,24 @@ export function useAuraWeave({
           localStreamRef.current = audioStream;
           setIsVideoMuted(true);
           setLocalStream(audioStream);
+
+          peerConnectionsRef.current.forEach((pc) => {
+            audioStream.getTracks().forEach((track) => {
+              const senders = pc.getSenders();
+              const exists = senders.some((s) => s.track?.kind === track.kind);
+              if (!exists) {
+                pc.addTrack(track, audioStream);
+              }
+            });
+          });
         } catch {
-          setError("Microphone/camera access denied. You can still participate in the audience.");
+          console.warn("Microphone access denied or not available");
+          setIsVideoMuted(true);
+          setIsAudioMuted(true);
+        }
+      } finally {
+        if (active) {
+          setMediaReady(true);
         }
       }
     }
@@ -140,11 +148,11 @@ export function useAuraWeave({
         localStreamRef.current = null;
       }
     };
-  }, [isStageMember]);
+  }, []);
 
-  // 2. Connect to AuraWeave Signaling Server
+  // 2. Connect to AuraWeave Signaling Server once Media is ready
   useEffect(() => {
-    if (!roomName || !user?.id) return;
+    if (!roomName || !user?.id || !mediaReady) return;
 
     const wsUrl = getAuraWeaveWsUrl();
     const ws = new WebSocket(wsUrl);
@@ -300,7 +308,7 @@ export function useAuraWeave({
       peerConnectionsRef.current.forEach((pc) => pc.close());
       peerConnectionsRef.current.clear();
     };
-  }, [roomName, user?.id, isHost]);
+  }, [roomName, user?.id, isHost, mediaReady]);
 
   const addPeerState = (peer: AuraWeavePeer) => {
     // Never add ourselves as a remote peer
@@ -342,8 +350,8 @@ export function useAuraWeave({
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peerConnectionsRef.current.set(targetPeerId, pc);
 
-    // Only add local tracks if we are on the Stage (Host / Presenter)
-    if (isStageMember && localStreamRef.current) {
+    // Add local tracks (microphone and camera) to peer connection
+    if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current!);
       });
@@ -364,12 +372,18 @@ export function useAuraWeave({
     };
 
     pc.ontrack = (event) => {
-      const remoteStream = event.streams[0] || new MediaStream([event.track]);
       setPeers((prev) => {
         const next = new Map(prev);
         const p = next.get(targetPeerId);
         if (p) {
-          next.set(targetPeerId, { ...p, stream: remoteStream });
+          let stream = p.stream;
+          if (!stream) {
+            stream = new MediaStream();
+          }
+          if (!stream.getTracks().some((t) => t.id === event.track.id)) {
+            stream.addTrack(event.track);
+          }
+          next.set(targetPeerId, { ...p, stream });
         }
         return next;
       });
