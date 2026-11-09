@@ -101,7 +101,7 @@ export default function Meeting() {
       }
     }
 
-    async function fetchToken() {
+    async function fetchToken(retries = 2) {
       try {
         const base = getApiBase();
         const apiUrl = base ? `${base}/api/token` : "/api/token";
@@ -115,9 +115,14 @@ export default function Meeting() {
           })
         });
 
-        // Guard against HTML error pages
+        // Guard against HTML error pages (e.g. Render 502 during redeploy)
         const ct = response.headers.get("content-type") || "";
         if (!ct.includes("application/json")) {
+          if (retries > 0) {
+            // Wait 3 seconds and retry
+            await new Promise(r => setTimeout(r, 3000));
+            return fetchToken(retries - 1);
+          }
           throw new Error("Backend API is currently redeploying. Please try again in 1-2 minutes.");
         }
 

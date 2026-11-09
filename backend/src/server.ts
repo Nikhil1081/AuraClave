@@ -19,7 +19,8 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // Health check endpoint for Render
 app.get("/", (_req: Request, res: Response) => {

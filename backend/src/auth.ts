@@ -18,8 +18,7 @@ export function generateToken(user: UserRecord): string {
     {
       id: user.id,
       email: user.email,
-      fullName: user.fullName,
-      avatarUrl: user.avatarUrl || ""
+      fullName: user.fullName
     },
     JWT_SECRET,
     { expiresIn: "30d" }
