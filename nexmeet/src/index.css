@@ -1738,7 +1738,7 @@
 
 .meeting-footer {
   position: fixed;
-  bottom: 18px;
+  bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
@@ -1747,28 +1747,122 @@
 .meeting-controls-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(15, 20, 34, 0.88);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  gap: 10px;
+  background: rgba(13, 17, 30, 0.94);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   padding: 8px 14px;
-  border-radius: 20px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(124, 58, 237, 0.15);
+  border-radius: 18px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 25px rgba(124, 58, 237, 0.2);
+}
+
+.controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls-divider {
+  width: 1px;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 2px;
 }
 
 .control-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
+  height: 42px;
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: #f1f5f9;
-  padding: 8px 14px;
+  padding: 0 14px;
   border-radius: 12px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s ease;
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
+}
+
+/* Ensure Language Selector Button in Toolbar matches all other buttons */
+.meeting-footer .lang-btn {
+  height: 42px !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 0 12px !important;
+  color: #f1f5f9 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  transition: all 0.15s ease !important;
+}
+
+.meeting-footer .lang-btn:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  transform: translateY(-1px);
+}
+
+/* Dropdown MUST open UPWARDS from the bottom meeting toolbar */
+.meeting-footer .lang-dropdown {
+  top: auto !important;
+  bottom: calc(100% + 14px) !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  z-index: 9999 !important;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(124, 58, 237, 0.25) !important;
+  border: 1px solid rgba(139, 92, 246, 0.4) !important;
+}
+
+/* Live Closed Captions Floating Banner */
+.live-caption-pill {
+  position: fixed;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(11, 15, 26, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  color: #ffffff;
+  padding: 8px 20px;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
+  z-index: 90;
+  max-width: 85vw;
+  text-align: center;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.caption-speaker {
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.caption-text {
+  color: #f8fafc;
+}
+
+/* Ensure meeting content leaves ample room for the bottom toolbar */
+.meeting-content {
+  padding-bottom: 88px !important;
 }
 
 .control-btn:hover {

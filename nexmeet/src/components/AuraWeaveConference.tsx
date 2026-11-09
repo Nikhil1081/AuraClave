@@ -423,15 +423,20 @@ export default function AuraWeaveConference({
           {/* Local Tile (if on Stage) */}
           {isStageMember && (
             <div className="auraweave-tile local-tile">
-              {!isVideoMuted && localStream ? (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
-                />
-              ) : (
+              <video
+                ref={(el) => {
+                  if (el && localStream && el.srcObject !== localStream) {
+                    el.srcObject = localStream;
+                  }
+                }}
+                autoPlay
+                playsInline
+                muted
+                style={{ display: isVideoMuted ? "none" : "block" }}
+                className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
+              />
+
+              {isVideoMuted && (
                 <div className="tile-placeholder">
                   {myAvatar ? (
                     <img src={myAvatar} alt={myName} className="tile-avatar-img" />
@@ -486,94 +491,104 @@ export default function AuraWeaveConference({
       {/* Floating Bottom Controls */}
       <footer className="meeting-footer">
         <div className="meeting-controls-wrap">
-          {/* Stage Controls */}
-          {isStageMember ? (
-            <>
-              <button
-                type="button"
-                className={`control-btn ${isAudioMuted ? "danger" : "active"}`}
-                onClick={toggleAudio}
-                title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
-              >
-                {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
-                <span>{isAudioMuted ? "Unmute" : "Mute"}</span>
-              </button>
+          {/* Group 1: Media / Stage Controls */}
+          <div className="controls-group">
+            {isStageMember ? (
+              <>
+                <button
+                  type="button"
+                  className={`control-btn ${isAudioMuted ? "danger" : ""}`}
+                  onClick={toggleAudio}
+                  title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
+                >
+                  {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                  <span>{isAudioMuted ? "Unmute" : "Mute"}</span>
+                </button>
 
-              <button
-                type="button"
-                className={`control-btn ${isVideoMuted ? "danger" : "active"}`}
-                onClick={toggleVideo}
-                title={isVideoMuted ? "Start camera" : "Stop camera"}
-              >
-                {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
-                <span>{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
-              </button>
+                <button
+                  type="button"
+                  className={`control-btn ${isVideoMuted ? "danger" : ""}`}
+                  onClick={toggleVideo}
+                  title={isVideoMuted ? "Start camera" : "Stop camera"}
+                >
+                  {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
+                  <span>{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
+                </button>
 
+                <button
+                  type="button"
+                  className={`control-btn ${isScreenSharing ? "accent" : ""}`}
+                  onClick={toggleScreenShare}
+                  title="Share Screen to all attendees"
+                >
+                  <Monitor size={18} />
+                  <span>{isScreenSharing ? "Stop Sharing" : "Share"}</span>
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
-                className={`control-btn ${isScreenSharing ? "accent" : ""}`}
-                onClick={toggleScreenShare}
-                title="Share Screen to all 1,000 attendees"
+                className={`control-btn ${myHandRaised ? "hand-raised-glow" : "accent"}`}
+                onClick={toggleRaiseHand}
+                title={myHandRaised ? "Lower your hand" : "Raise hand to speak on stage"}
               >
-                <Monitor size={18} />
-                <span>{isScreenSharing ? "Stop Sharing" : "Share Screen"}</span>
+                <Hand size={18} className={myHandRaised ? "animate-bounce" : ""} />
+                <span>{myHandRaised ? "Hand Raised" : "Raise Hand"}</span>
               </button>
-            </>
-          ) : (
-            /* Audience Raise Hand Control */
+            )}
+          </div>
+
+          <div className="controls-divider" />
+
+          {/* Group 2: Collaboration, Captions & AI */}
+          <div className="controls-group">
+            <LanguageSelector compact />
+
             <button
               type="button"
-              className={`control-btn ${myHandRaised ? "hand-raised-glow" : "accent"}`}
-              onClick={toggleRaiseHand}
-              title={myHandRaised ? "Lower your hand" : "Raise hand to request speaking on stage"}
+              className={`control-btn ${captionsEnabled ? "accent" : ""}`}
+              onClick={() => setCaptionsEnabled(!captionsEnabled)}
+              title="Live Closed Captions"
             >
-              <Hand size={18} className={myHandRaised ? "animate-bounce" : ""} />
-              <span>{myHandRaised ? "Lower Hand" : "Raise Hand"}</span>
+              <Subtitles size={18} />
+              <span>CC</span>
             </button>
-          )}
 
-          {/* Universal Controls */}
-          <LanguageSelector compact />
+            <button
+              type="button"
+              className={`control-btn ${isRecording ? "danger recording-pulse" : ""}`}
+              onClick={toggleRecording}
+              title="Meeting Recorder (Zero Prompt)"
+            >
+              {isRecording ? <Square size={16} /> : <CircleDot size={18} />}
+              <span>{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
+            </button>
 
-          <button
-            type="button"
-            className={`control-btn ${captionsEnabled ? "accent" : ""}`}
-            onClick={() => setCaptionsEnabled(!captionsEnabled)}
-            title="Live Closed Captions"
-          >
-            <Subtitles size={18} />
-            <span>CC</span>
-          </button>
+            <button
+              type="button"
+              className="control-btn ai-btn"
+              onClick={handleGenerateAiNotes}
+              title="Generate AI Meeting Minutes"
+            >
+              <Sparkles size={18} />
+              <span>AI Notes</span>
+            </button>
+          </div>
 
-          <button
-            type="button"
-            className={`control-btn ${isRecording ? "danger recording-pulse" : ""}`}
-            onClick={toggleRecording}
-            title="Meeting Recorder (Zero Prompt)"
-          >
-            {isRecording ? <Square size={16} /> : <CircleDot size={18} />}
-            <span>{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
-          </button>
+          <div className="controls-divider" />
 
-          <button
-            type="button"
-            className="control-btn ai-btn"
-            onClick={handleGenerateAiNotes}
-            title="Generate AI Meeting Minutes"
-          >
-            <Sparkles size={18} />
-            <span>AI Notes</span>
-          </button>
-
-          <button
-            type="button"
-            className="control-btn leave-btn"
-            onClick={handleLeave}
-            title="Leave meeting"
-          >
-            <PhoneOff size={18} />
-            <span>Leave</span>
-          </button>
+          {/* Group 3: Leave Room */}
+          <div className="controls-group">
+            <button
+              type="button"
+              className="control-btn leave-btn"
+              onClick={handleLeave}
+              title="Leave meeting"
+            >
+              <PhoneOff size={18} />
+              <span>Leave</span>
+            </button>
+          </div>
         </div>
       </footer>
 
@@ -715,26 +730,24 @@ function RemoteStagePeerTile({
   isHost: boolean;
   onDemote: () => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (videoRef.current && peer.stream) {
-      videoRef.current.srcObject = peer.stream;
-    }
-  }, [peer.stream]);
-
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
+  const showVideo = peer.stream && !peer.isVideoMuted;
 
   return (
     <div className="auraweave-tile remote-tile">
-      {peer.stream && !peer.isVideoMuted ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className={`tile-video ${peer.isScreenSharing ? "screen" : ""}`}
-        />
-      ) : (
+      <video
+        ref={(el) => {
+          if (el && peer.stream && el.srcObject !== peer.stream) {
+            el.srcObject = peer.stream;
+          }
+        }}
+        autoPlay
+        playsInline
+        style={{ display: showVideo ? "block" : "none" }}
+        className={`tile-video ${peer.isScreenSharing ? "screen" : ""}`}
+      />
+
+      {!showVideo && (
         <div className="tile-placeholder">
           {peer.avatarUrl ? (
             <img src={peer.avatarUrl} alt={peer.name} className="tile-avatar-img" />
