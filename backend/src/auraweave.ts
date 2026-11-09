@@ -47,6 +47,21 @@ export class AuraWeaveSignaler {
               }
 
               const room = this.rooms.get(roomName)!;
+
+              // Clean up any stale connection for this exact same user
+              room.forEach((oldP, oldPeerId) => {
+                if (oldP.userId === userId) {
+                  try {
+                    oldP.ws.close();
+                  } catch {}
+                  room.delete(oldPeerId);
+                  this.broadcast(roomName, oldPeerId, {
+                    type: "peer-left",
+                    data: { peerId: oldPeerId }
+                  });
+                }
+              });
+
               const isFirst = room.size === 0;
 
               // First participant or designated host gets "host" / "presenter" role, others start in "audience"
@@ -69,13 +84,13 @@ export class AuraWeaveSignaler {
 
               room.set(currentPeerId, participant);
 
-              // Extract stage members (excluding the current joining peer)
+              // Extract stage members (strictly excluding the joining user)
               const stageMembers: any[] = [];
               const handsRaised: any[] = [];
               let audienceCount = 0;
 
               room.forEach((p) => {
-                if (p.peerId !== currentPeerId && (p.role === "host" || p.role === "presenter")) {
+                if (p.peerId !== currentPeerId && p.userId !== userId && (p.role === "host" || p.role === "presenter")) {
                   stageMembers.push({
                     peerId: p.peerId,
                     userId: p.userId,
@@ -86,11 +101,11 @@ export class AuraWeaveSignaler {
                     isVideoMuted: p.isVideoMuted,
                     isScreenSharing: p.isScreenSharing
                   });
-                } else if (p.peerId !== currentPeerId && p.role === "audience") {
+                } else if (p.peerId !== currentPeerId && p.userId !== userId && p.role === "audience") {
                   audienceCount++;
                 }
 
-                if (p.peerId !== currentPeerId && p.raisedHand) {
+                if (p.peerId !== currentPeerId && p.userId !== userId && p.raisedHand) {
                   handsRaised.push({
                     peerId: p.peerId,
                     userId: p.userId,

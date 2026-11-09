@@ -210,9 +210,36 @@ export function useAuraWeave({
             setTotalParticipants(data.totalParticipants || 1);
             setHandsRaised(data.handsRaised || []);
 
-            // Synchronize stage members
-            const stageMembers: any[] = data.stageMembers || [];
-            stageMembers.forEach((sm) => {
+            // Synchronize stage members: prune any peer not currently on stage or representing self
+            const serverStageList: any[] = data.stageMembers || [];
+            const activeRemotePeerIds = new Set(
+              serverStageList
+                .filter(
+                  (sm) =>
+                    sm.peerId !== myPeerIdRef.current &&
+                    (!user?.id || sm.userId !== user.id) &&
+                    (!user?.name || sm.name !== user.name)
+                )
+                .map((sm) => sm.peerId)
+            );
+
+            setPeers((prev) => {
+              const next = new Map();
+              prev.forEach((peer, pId) => {
+                if (activeRemotePeerIds.has(pId)) {
+                  next.set(pId, peer);
+                } else {
+                  const pc = peerConnectionsRef.current.get(pId);
+                  if (pc) {
+                    pc.close();
+                    peerConnectionsRef.current.delete(pId);
+                  }
+                }
+              });
+              return next;
+            });
+
+            serverStageList.forEach((sm) => {
               addPeerState(sm);
             });
             break;
@@ -277,7 +304,11 @@ export function useAuraWeave({
 
   const addPeerState = (peer: AuraWeavePeer) => {
     // Never add ourselves as a remote peer
-    if (peer.peerId === myPeerIdRef.current || (user?.id && peer.userId === user.id)) {
+    if (
+      peer.peerId === myPeerIdRef.current ||
+      (user?.id && peer.userId === user.id) ||
+      (user?.name && peer.name === user.name && peer.name !== "Guest")
+    ) {
       return;
     }
     setPeers((prev) => {
@@ -436,24 +467,86 @@ export function useAuraWeave({
     }
   }, []);
 
-  const toggleVideo = useCallback(() => {
-    if (!localStreamRef.current) return;
-    const videoTrack = localStreamRef.current.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled;
-      const muted = !videoTrack.enabled;
-      setIsVideoMuted(muted);
+  const toggleVideo = useCallback(async () => {
+    if (isVideoMuted || !cameraTrackRef.current || cameraTrackRef.current.readyState !== "live") {
+      // 1. User wants to turn camera ON
+      try {
+        let track = cameraTrackRef.current;
+        if (!track || track.readyState !== "live") {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
+          });
+          track = stream.getVideoTracks()[0];
+          cameraTrackRef.current = track;
+        } else {
+          track.enabled = true;
+        }
 
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "media-state",
-            data: { isVideoMuted: muted }
-          })
-        );
+        // If not actively screen sharing, attach camera to local display & remote peers
+        if (!isScreenSharing) {
+          const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+          const newStream = new MediaStream([track, ...audioTracks]);
+          localStreamRef.current = newStream;
+          setLocalStream(newStream);
+          setIsVideoMuted(false);
+
+          peerConnectionsRef.current.forEach((pc) => {
+            const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+            if (sender) {
+              sender.replaceTrack(track);
+            } else {
+              pc.addTrack(track, newStream);
+            }
+          });
+
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: "media-state",
+                data: { isVideoMuted: false }
+              })
+            );
+          }
+        } else {
+          // Keep screen sharing active on display, but record that camera is available
+          setIsVideoMuted(false);
+        }
+      } catch (err) {
+        console.warn("Could not start camera:", err);
+        setError("Camera permission denied or camera device in use by another app.");
+      }
+    } else {
+      // 2. User wants to turn camera OFF (stops sensor completely to turn off webcam hardware LED)
+      if (cameraTrackRef.current) {
+        cameraTrackRef.current.stop();
+        cameraTrackRef.current = null;
+      }
+      setIsVideoMuted(true);
+
+      if (!isScreenSharing) {
+        const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+        const audioStream = new MediaStream([...audioTracks]);
+        localStreamRef.current = audioStream;
+        setLocalStream(audioStream);
+
+        peerConnectionsRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) {
+            sender.replaceTrack(null);
+          }
+        });
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: "media-state",
+              data: { isVideoMuted: true }
+            })
+          );
+        }
       }
     }
-  }, []);
+  }, [isVideoMuted, isScreenSharing]);
 
   const toggleScreenShare = useCallback(async () => {
     if (isScreenSharing) {
@@ -462,34 +555,57 @@ export function useAuraWeave({
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
       }
+      setIsScreenSharing(false);
 
-      // 2. Restore camera stream for local view & peer connections
-      if (cameraTrackRef.current) {
+      // 2. Check whether to restore live camera or revert to audio-only
+      if (cameraTrackRef.current && cameraTrackRef.current.readyState === "live") {
         const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
-        const restoredCameraStream = new MediaStream([cameraTrackRef.current, ...audioTracks]);
-        localStreamRef.current = restoredCameraStream;
-        setLocalStream(restoredCameraStream);
+        const restoredCamStream = new MediaStream([cameraTrackRef.current, ...audioTracks]);
+        localStreamRef.current = restoredCamStream;
+        setLocalStream(restoredCamStream);
+        setIsVideoMuted(false);
 
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender && cameraTrackRef.current) {
+          if (sender) {
             sender.replaceTrack(cameraTrackRef.current);
           }
         });
-      }
 
-      setIsScreenSharing(false);
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: "media-state",
+              data: { isScreenSharing: false, isVideoMuted: false }
+            })
+          );
+        }
+      } else {
+        // Camera was off: remain muted
+        setIsVideoMuted(true);
+        const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+        const audioStream = new MediaStream([...audioTracks]);
+        localStreamRef.current = audioStream;
+        setLocalStream(audioStream);
 
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "media-state",
-            data: { isScreenSharing: false }
-          })
-        );
+        peerConnectionsRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) {
+            sender.replaceTrack(null);
+          }
+        });
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: "media-state",
+              data: { isScreenSharing: false, isVideoMuted: true }
+            })
+          );
+        }
       }
     } else {
-      // 1. Start Screen Sharing
+      // 1. Start Screen Sharing (works 100% independently whether camera is ON or OFF)
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: { cursor: "always" } as any,
@@ -505,7 +621,7 @@ export function useAuraWeave({
           toggleScreenShare();
         };
 
-        // 2. Set local display to show screen share immediately
+        // Combine screen track with microphone audio
         const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
         const combinedScreenStream = new MediaStream([screenTrack, ...audioTracks]);
         localStreamRef.current = combinedScreenStream;
@@ -513,11 +629,13 @@ export function useAuraWeave({
         setIsVideoMuted(false);
         setIsScreenSharing(true);
 
-        // 3. Replace outgoing video track for all remote peers
+        // Push screen video track to all peer connections (add or replace)
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (sender) {
             sender.replaceTrack(screenTrack);
+          } else {
+            pc.addTrack(screenTrack, combinedScreenStream);
           }
         });
 
@@ -525,7 +643,7 @@ export function useAuraWeave({
           wsRef.current.send(
             JSON.stringify({
               type: "media-state",
-              data: { isScreenSharing: true }
+              data: { isScreenSharing: true, isVideoMuted: false }
             })
           );
         }
@@ -587,6 +705,7 @@ export function useAuraWeave({
   };
 
   return {
+    myPeerId: myPeerIdRef.current,
     role,
     isStageMember,
     localStream,
@@ -594,7 +713,8 @@ export function useAuraWeave({
       (p) =>
         (p.role === "host" || p.role === "presenter") &&
         p.peerId !== myPeerIdRef.current &&
-        (!user?.id || p.userId !== user.id)
+        (!user?.id || p.userId !== user.id) &&
+        (!user?.name || p.name !== user.name)
     ),
     audienceCount,
     totalParticipants,

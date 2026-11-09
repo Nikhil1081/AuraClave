@@ -49,6 +49,7 @@ export default function AuraWeaveConference({
 
   // AuraWeave 1,000-Participant Engine Hook
   const {
+    myPeerId,
     role,
     isStageMember,
     localStream,
@@ -425,8 +426,13 @@ export default function AuraWeaveConference({
             <div className="auraweave-tile local-tile">
               <video
                 ref={(el) => {
-                  if (el && localStream && el.srcObject !== localStream) {
-                    el.srcObject = localStream;
+                  if (el) {
+                    if (el.srcObject !== localStream) {
+                      el.srcObject = localStream;
+                    }
+                    if (localStream && !isVideoMuted) {
+                      el.play().catch(() => {});
+                    }
                   }
                 }}
                 autoPlay
@@ -459,15 +465,22 @@ export default function AuraWeaveConference({
             </div>
           )}
 
-          {/* Remote Stage Peers */}
-          {peers.map((peer) => (
-            <RemoteStagePeerTile
-              key={peer.peerId}
-              peer={peer}
-              isHost={role === "host"}
-              onDemote={() => demoteToAudience(peer.peerId)}
-            />
-          ))}
+          {/* Remote Stage Peers (strictly excluding self) */}
+          {peers
+            .filter(
+              (peer) =>
+                peer.peerId !== myPeerId &&
+                (!user?.id || peer.userId !== user.id) &&
+                (!myName || peer.name !== myName)
+            )
+            .map((peer) => (
+              <RemoteStagePeerTile
+                key={peer.peerId}
+                peer={peer}
+                isHost={role === "host"}
+                onDemote={() => demoteToAudience(peer.peerId)}
+              />
+            ))}
 
           {/* Empty Stage Placeholder if Audience with no Active Presenter */}
           {!isStageMember && peers.length === 0 && (
@@ -686,7 +699,9 @@ export default function AuraWeaveConference({
               ) : aiError ? (
                 <div className="notice error">{aiError}</div>
               ) : (
-                <div className="ai-summary-text">{aiSummary}</div>
+                <div className="ai-summary-text">
+                  <FormattedAiNotes text={aiSummary} />
+                </div>
               )}
             </div>
 
@@ -737,8 +752,13 @@ function RemoteStagePeerTile({
     <div className="auraweave-tile remote-tile">
       <video
         ref={(el) => {
-          if (el && peer.stream && el.srcObject !== peer.stream) {
-            el.srcObject = peer.stream;
+          if (el) {
+            if (el.srcObject !== peer.stream) {
+              el.srcObject = peer.stream || null;
+            }
+            if (peer.stream && showVideo) {
+              el.play().catch(() => {});
+            }
           }
         }}
         autoPlay
@@ -782,4 +802,107 @@ function RemoteStagePeerTile({
       )}
     </div>
   );
+}
+
+// Executive Humanized AI Markdown Formatter
+function FormattedAiNotes({ text }: { text: string }) {
+  if (!text) return null;
+
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let inTable = false;
+  let tableHeader: string[] = [];
+  let tableRows: string[][] = [];
+
+  const parseInline = (str: string): React.ReactNode => {
+    const parts = str.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+        return <em key={i}>{part.slice(1, -1)}</em>;
+      }
+      return part;
+    });
+  };
+
+  const flushTable = (key: string) => {
+    if (inTable && tableHeader.length > 0) {
+      elements.push(
+        <div key={key} className="overflow-x-auto my-3">
+          <table>
+            <thead>
+              <tr>
+                {tableHeader.map((th, i) => (
+                  <th key={i}>{parseInline(th)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row, rIdx) => (
+                <tr key={rIdx}>
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx}>{parseInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      inTable = false;
+      tableHeader = [];
+      tableRows = [];
+    }
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const cells = trimmed
+        .slice(1, -1)
+        .split("|")
+        .map((c) => c.trim());
+      if (cells.every((c) => /^[:-]+$/.test(c))) {
+        return;
+      }
+      if (!inTable) {
+        inTable = true;
+        tableHeader = cells;
+      } else {
+        tableRows.push(cells);
+      }
+      return;
+    } else if (inTable) {
+      flushTable(`table-${index}`);
+    }
+
+    if (!trimmed) return;
+
+    if (trimmed.startsWith("### ")) {
+      elements.push(<h3 key={index}>{parseInline(trimmed.slice(4))}</h3>);
+    } else if (trimmed.startsWith("## ")) {
+      elements.push(<h2 key={index}>{parseInline(trimmed.slice(3))}</h2>);
+    } else if (trimmed.startsWith("# ")) {
+      elements.push(<h1 key={index}>{parseInline(trimmed.slice(2))}</h1>);
+    } else if (trimmed === "---" || trimmed === "***") {
+      elements.push(<hr key={index} />);
+    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      elements.push(
+        <ul key={index}>
+          <li>{parseInline(trimmed.slice(2))}</li>
+        </ul>
+      );
+    } else {
+      elements.push(<p key={index}>{parseInline(trimmed)}</p>);
+    }
+  });
+
+  if (inTable) {
+    flushTable("table-end");
+  }
+
+  return <div className="ai-notes-content">{elements}</div>;
 }
