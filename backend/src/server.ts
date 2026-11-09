@@ -2,7 +2,6 @@ import express, { type Request, type Response } from "express";
 import http from "http";
 import cors from "cors";
 import dotenv from "dotenv";
-import { AccessToken } from "livekit-server-sdk";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
 import { AuraWeaveSignaler } from "./auraweave.js";
@@ -137,46 +136,6 @@ app.get("/api/auth/me", async (req: Request, res: Response) => {
     return res.status(200).json({ user });
   } catch (err: any) {
     return res.status(401).json({ error: err?.message || "Not authenticated." });
-  }
-});
-
-// LiveKit token endpoint
-app.post("/api/token", async (req: Request, res: Response) => {
-  try {
-    const user = await getAuthenticatedUser(req);
-    const { roomName } = req.body ?? {};
-
-    if (typeof roomName !== "string" || !/^[a-zA-Z0-9_-]{3,80}$/.test(roomName)) {
-      return res.status(400).json({ error: "Invalid meeting room name." });
-    }
-
-    const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
-    if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
-      return res.status(500).json({ error: "LiveKit server credentials are not configured." });
-    }
-
-    const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-      identity: user.id,
-      name: user.user_metadata?.full_name || user.email || "AuraClave guest",
-      metadata: JSON.stringify({
-        avatar_url: user.user_metadata?.avatar_url || ""
-      }),
-      ttl: "24h"
-    });
-
-    token.addGrant({
-      roomJoin: true,
-      room: roomName,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true
-    });
-
-    return res.status(200).json({ token: await token.toJwt(), serverUrl: LIVEKIT_URL });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create meeting token.";
-    const status = message.includes("sign in") || message.includes("session") ? 401 : 500;
-    return res.status(status).json({ error: message });
   }
 });
 
