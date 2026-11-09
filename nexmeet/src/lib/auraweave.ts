@@ -182,11 +182,56 @@ export function useAuraWeave({
           .on(RoomEvent.DataReceived, onData);
 
         await room.connect(data.url, data.token);
-        if (!active) return;
+        if (!active) {
+          await room.disconnect();
+          return;
+        }
         await room.localParticipant.setMicrophoneEnabled(true);
         syncLocal();
         syncPeers();
         setConnected(true);
+
+        const refreshToken = async () => {
+          try {
+            const refreshResponse = await fetch(getApiUrl("/api/livekit/token"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${localStorage.getItem("auraclave_auth_token") || ""}`
+              },
+              body: JSON.stringify({ roomName })
+            });
+            const refreshed = await refreshResponse.json();
+            if (!refreshResponse.ok) {
+              throw new Error(refreshed.error || "Unable to refresh the meeting token.");
+            }
+
+            const microphoneEnabled = room.localParticipant.isMicrophoneEnabled;
+            const cameraEnabled = room.localParticipant.isCameraEnabled;
+            const screenShareEnabled = room.localParticipant.isScreenShareEnabled;
+
+            // Reconnect before the two-hour token expires. Keeping tracks alive
+            // avoids ending the meeting when LiveKit rotates the credentials.
+            await room.disconnect(false);
+            await room.connect(refreshed.url, refreshed.token);
+            await room.localParticipant.setMicrophoneEnabled(microphoneEnabled);
+            await room.localParticipant.setCameraEnabled(cameraEnabled);
+            if (screenShareEnabled) {
+              await room.localParticipant.setScreenShareEnabled(true);
+            }
+            syncLocal();
+            syncPeers();
+          } catch (refreshError) {
+            setError(
+              refreshError instanceof Error
+                ? `Meeting token refresh failed: ${refreshError.message}`
+                : "Meeting token refresh failed."
+            );
+          }
+        };
+
+        const refreshTimer = window.setInterval(refreshToken, 90 * 60 * 1000);
+        return () => window.clearInterval(refreshTimer);
       } catch (err) {
         if (active) {
           setError(err instanceof Error ? err.message : "Unable to connect to the meeting SFU.");
@@ -194,9 +239,13 @@ export function useAuraWeave({
       }
     }
 
-    connect();
+    let cleanupRefresh: (() => void) | undefined;
+    connect().then((cleanup) => {
+      cleanupRefresh = cleanup;
+    });
     return () => {
       active = false;
+      cleanupRefresh?.();
       room.removeAllListeners();
       room.disconnect();
       setConnected(false);
