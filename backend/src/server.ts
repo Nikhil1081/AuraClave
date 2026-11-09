@@ -221,6 +221,7 @@ app.post("/api/ai", async (req: Request, res: Response) => {
 
 // 1. Request to join a room
 app.post("/api/room/:roomName/join-request", async (req: Request, res: Response) => {
+
   try {
     const user = await getAuthenticatedUser(req);
     const roomName = String(req.params.roomName);
