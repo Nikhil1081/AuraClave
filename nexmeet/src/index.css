@@ -1195,3 +1195,350 @@
   font-size: 11px;
   color: #86efac;
 }
+
+
+/* --- Waiting Room Screen --- */
+.waiting-room-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 30%, #151d30 0%, #0a0d14 100%);
+}
+.waiting-room-card {
+  width: 100%;
+  max-width: 480px;
+  background: rgba(17, 23, 38, 0.95);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  padding: 36px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.7);
+  animation: fadeIn 0.3s ease-out;
+}
+.waiting-pulse-avatar {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 12px 0;
+}
+.pulse-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.2);
+  border: 2px solid rgba(139, 92, 246, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(139, 92, 246, 0.4);
+  animation: pulseWave 2.4s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+.pulse-ring.ring-2 {
+  animation-delay: 1.2s;
+}
+@keyframes pulseWave {
+  0% { transform: scale(0.7); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.waiting-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  font-size: 13px;
+  color: #c4b5fd;
+  margin-top: 6px;
+}
+.waiting-card-actions {
+  width: 100%;
+  margin-top: 14px;
+}
+.waiting-rejected-icon {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  border: 2px solid rgba(239, 68, 68, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px 0;
+}
+
+/* --- Host Floating Admission Banner --- */
+.host-waiting-banner {
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(17, 23, 38, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 16px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(124, 58, 237, 0.25);
+  z-index: 1000;
+  animation: bannerSlideDown 0.25s ease-out;
+}
+@keyframes bannerSlideDown {
+  from { opacity: 0; transform: translate(-50%, -12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.host-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.host-banner-badge {
+  background: #7c3aed;
+  color: #ffffff;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.host-banner-text {
+  font-size: 13px;
+  color: #f1f5f9;
+}
+.host-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-admit {
+  background: #22c55e;
+  color: #ffffff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+.btn-admit:hover {
+  background: #16a34a;
+  transform: translateY(-1px);
+}
+.btn-reject {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+.btn-reject:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+}
+.btn-open-all {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+.btn-open-all:hover {
+  background: rgba(59, 130, 246, 0.35);
+  color: #ffffff;
+}
+
+/* Host Room Pill in Header */
+.host-room-pill {
+  cursor: pointer;
+}
+.host-room-pill.open {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+.host-room-pill.locked {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fcd34d;
+}
+
+/* Host Admission Policy Cards */
+.host-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.room-policy-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.room-policy-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.room-policy-card.selected {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: rgba(139, 92, 246, 0.6);
+}
+.policy-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.policy-icon.open {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+.policy-icon.locked {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+.policy-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.policy-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #ffffff;
+}
+.active-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: #7c3aed;
+  color: #ffffff;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.policy-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Waiting List inside Modal */
+.waiting-list-section {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 4px;
+}
+.waiting-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+.waiting-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.waiting-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+.waiting-user-name {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+.waiting-user-name small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.waiting-user-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-mini {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+.btn-mini.admit {
+  background: #22c55e;
+  color: #ffffff;
+}
+.btn-mini.admit:hover {
+  background: #16a34a;
+}
+.btn-mini.reject {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+.btn-mini.reject:hover {
+  background: rgba(239, 68, 68, 0.4);
+  color: #ffffff;
+}

@@ -4,6 +4,14 @@ import dotenv from "dotenv";
 import { AccessToken } from "livekit-server-sdk";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
+import {
+  requestToJoin,
+  checkAdmission,
+  setAdmissionDecision,
+  updateRoomSettings,
+  getWaitingList,
+  getRoom
+} from "./roomManager.js";
 
 dotenv.config();
 
@@ -206,6 +214,118 @@ app.post("/api/ai", async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI request failed.";
     return res.status(401).json({ error: message });
+  }
+});
+
+// --- Waiting Room & Admission Endpoints ---
+
+// 1. Request to join a room
+app.post("/api/room/:roomName/join-request", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+
+    const result = requestToJoin(roomName, {
+      id: user.id,
+      name: user.user_metadata?.full_name || user.email,
+      email: user.email,
+      avatarUrl: user.user_metadata?.avatar_url
+    });
+
+    const room = getRoom(roomName);
+
+    return res.status(200).json({
+      ...result,
+      openToAll: room?.openToAll ?? true,
+      waitingRoomEnabled: room?.waitingRoomEnabled ?? false
+    });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Authentication failed." });
+  }
+});
+
+// 2. Check admission status (for waiting participants)
+app.get("/api/room/:roomName/check-admission", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const result = checkAdmission(roomName, user.id);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Authentication failed." });
+  }
+});
+
+// 3. Host: Get waiting list and room admission settings
+app.get("/api/room/:roomName/waiting", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const room = getRoom(roomName);
+
+    if (!room || room.hostId !== user.id) {
+      return res.status(200).json({
+        isHost: false,
+        openToAll: room?.openToAll ?? true,
+        waitingRoomEnabled: room?.waitingRoomEnabled ?? false,
+        waitingList: []
+      });
+    }
+
+    const waitingList = getWaitingList(roomName, user.id);
+    return res.status(200).json({
+      isHost: true,
+      openToAll: room.openToAll,
+      waitingRoomEnabled: room.waitingRoomEnabled,
+      waitingList
+    });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Authentication failed." });
+  }
+});
+
+// 4. Host: Make decision (admit / reject)
+app.post("/api/room/:roomName/decision", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const { participantId, decision } = req.body ?? {};
+
+    if (!participantId || !["admit", "reject"].includes(decision)) {
+      return res.status(400).json({ error: "Invalid decision parameters." });
+    }
+
+    const success = setAdmissionDecision(roomName, user.id, participantId, decision);
+    if (!success) {
+      return res.status(403).json({ error: "Only the meeting host can admit or reject participants." });
+    }
+
+    const waitingList = getWaitingList(roomName, user.id);
+    return res.status(200).json({ success: true, waitingList });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Authentication failed." });
+  }
+});
+
+// 5. Host: Update room settings (Open to All / Waiting Room Enabled)
+app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const { openToAll, waitingRoomEnabled } = req.body ?? {};
+
+    const updated = updateRoomSettings(roomName, user.id, { openToAll, waitingRoomEnabled });
+    if (!updated) {
+      return res.status(403).json({ error: "Only the meeting host can update room settings." });
+    }
+
+    return res.status(200).json({
+      openToAll: updated.openToAll,
+      waitingRoomEnabled: updated.waitingRoomEnabled,
+      waitingCount: updated.waitingList.size
+    });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Authentication failed." });
   }
 });
 

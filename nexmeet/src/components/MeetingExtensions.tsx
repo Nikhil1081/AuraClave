@@ -13,7 +13,8 @@ import {
   LoaderCircle,
   Mic,
   Monitor,
-  Share2
+  Share2,
+  Video
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage, SUPPORTED_LANGUAGES } from "../contexts/LanguageContext";
@@ -215,9 +216,9 @@ export default function MeetingExtensions({
     };
   }, [captionsEnabled, room, user, currentSpeechCode]);
 
-  // 3. Meeting Recording (Audio Only or Screen Video)
-  // Mode A: Audio Recording (No screen sharing required!)
-  const startAudioRecording = async () => {
+  // 3. Meeting Recording (Zero-Prompt Meeting Recording + Audio/Screen)
+  // Smart Meeting Recording: Automatically grabs incoming screen share or room video + audio with ZERO PROMPTS!
+  const startMeetingRecording = async (forceAudioOnly = false) => {
     try {
       setShowRecordMenu(false);
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -225,17 +226,17 @@ export default function MeetingExtensions({
       audioContextRef.current = audioCtx;
       const destination = audioCtx.createMediaStreamDestination();
 
-      // 1. Capture local microphone
+      // 1. Capture local mic
       try {
         const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         userMicStreamRef.current = micStream;
         const micSource = audioCtx.createMediaStreamSource(micStream);
         micSource.connect(destination);
       } catch (micErr) {
-        console.warn("Could not access local mic, proceeding with room audio:", micErr);
+        console.warn("Could not attach local mic:", micErr);
       }
 
-      // 2. Connect remote participants' audio from LiveKit
+      // 2. Connect all remote participants' audio from LiveKit
       if (room) {
         room.remoteParticipants.forEach((participant) => {
           participant.trackPublications.forEach((pub) => {
@@ -245,22 +246,70 @@ export default function MeetingExtensions({
                 const remoteSource = audioCtx.createMediaStreamSource(remoteStream);
                 remoteSource.connect(destination);
               } catch (trackErr) {
-                console.warn("Could not attach participant audio track:", trackErr);
+                console.warn("Could not attach participant audio:", trackErr);
               }
             }
           });
         });
       }
 
-      let mimeType = "audio/webm;codecs=opus";
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      // 3. Find active screen share or video in room (NO PROMPT NEEDED!)
+      let activeVideoTrack: MediaStreamTrack | null = null;
+
+      if (!forceAudioOnly && room) {
+        // Priority 1: Check remote participants for screen share (e.g. host's screen share)
+        for (const p of room.remoteParticipants.values()) {
+          for (const pub of p.trackPublications.values()) {
+            if (pub.source === "screen_share" && pub.track && (pub.track as any).mediaStreamTrack) {
+              activeVideoTrack = (pub.track as any).mediaStreamTrack;
+              break;
+            }
+          }
+          if (activeVideoTrack) break;
+        }
+
+        // Priority 2: Check local participant's screen share
+        if (!activeVideoTrack && room.localParticipant) {
+          for (const pub of room.localParticipant.trackPublications.values()) {
+            if (pub.source === "screen_share" && pub.track && (pub.track as any).mediaStreamTrack) {
+              activeVideoTrack = (pub.track as any).mediaStreamTrack;
+              break;
+            }
+          }
+        }
+
+        // Priority 3: Check remote participant camera video
+        if (!activeVideoTrack) {
+          for (const p of room.remoteParticipants.values()) {
+            for (const pub of p.trackPublications.values()) {
+              if (pub.kind === "video" && pub.track && (pub.track as any).mediaStreamTrack) {
+                activeVideoTrack = (pub.track as any).mediaStreamTrack;
+                break;
+              }
+            }
+            if (activeVideoTrack) break;
+          }
+        }
       }
 
-      const mediaRecorder = mimeType
-        ? new MediaRecorder(destination.stream, { mimeType })
-        : new MediaRecorder(destination.stream);
+      let streamToRecord: MediaStream;
+      let mimeType = "video/webm";
 
+      if (activeVideoTrack) {
+        streamToRecord = new MediaStream([activeVideoTrack, ...destination.stream.getAudioTracks()]);
+        mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+          ? "video/webm;codecs=vp9,opus"
+          : "video/webm";
+        setRecordingMode("video");
+      } else {
+        streamToRecord = destination.stream;
+        mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+        setRecordingMode("audio");
+      }
+
+      const mediaRecorder = new MediaRecorder(streamToRecord, { mimeType });
       recordedChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
@@ -283,14 +332,15 @@ export default function MeetingExtensions({
           audioContextRef.current = null;
         }
 
-        const blob = new Blob(recordedChunksRef.current, { type: mimeType || "audio/webm" });
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
         if (blob.size === 0) return;
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        a.download = `AuraClave-Audio-${roomName}-${timestamp}.webm`;
+        const isVid = streamToRecord.getVideoTracks().length > 0;
+        a.download = `AuraClave-${isVid ? "Meeting" : "Audio"}-${roomName}-${timestamp}.webm`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -299,20 +349,19 @@ export default function MeetingExtensions({
 
       mediaRecorder.start(1000);
       mediaRecorderRef.current = mediaRecorder;
-      setRecordingMode("audio");
       setIsRecording(true);
 
       timerIntervalRef.current = setInterval(() => {
         setRecordingSeconds((sec) => sec + 1);
       }, 1000);
     } catch (err: any) {
-      console.error("Audio recording error:", err);
-      alert("Could not start audio recording: " + (err?.message || "Error"));
+      console.error("Recording error:", err);
+      alert("Could not start recording: " + (err?.message || "Error"));
     }
   };
 
-  // Mode B: Screen & Video Recording
-  const startScreenRecording = async () => {
+  // Mode C: Manual Desktop Screen Picker (only if user explicitly wants whole monitor)
+  const startDesktopRecording = async () => {
     try {
       setShowRecordMenu(false);
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -338,8 +387,6 @@ export default function MeetingExtensions({
         clearInterval(timerIntervalRef.current);
         setRecordingSeconds(0);
         setIsRecording(false);
-
-        // Stop all tracks in display stream
         stream.getTracks().forEach((track) => track.stop());
 
         const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
@@ -349,7 +396,7 @@ export default function MeetingExtensions({
         const a = document.createElement("a");
         a.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        a.download = `AuraClave-Video-${roomName}-${timestamp}.webm`;
+        a.download = `AuraClave-Desktop-${roomName}-${timestamp}.webm`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -373,7 +420,7 @@ export default function MeetingExtensions({
         setRecordingSeconds((sec) => sec + 1);
       }, 1000);
     } catch (err: any) {
-      console.error("Recording error:", err);
+      console.error("Desktop recording error:", err);
       if (err.name !== "NotAllowedError") {
         alert("Could not start recording: " + (err?.message || "Permission denied"));
       }
@@ -495,29 +542,43 @@ export default function MeetingExtensions({
               <div className="record-menu-header">Select Recording Mode</div>
               <button
                 className="record-menu-item"
-                onClick={startAudioRecording}
+                onClick={() => startMeetingRecording(false)}
+                type="button"
+              >
+                <div className="record-menu-icon video">
+                  <Video size={17} />
+                </div>
+                <div className="record-menu-info">
+                  <span className="record-menu-title">Record Meeting (Zero Prompts)</span>
+                  <span className="record-menu-sub">Captures active screen share or video & all voices without asking to share.</span>
+                </div>
+              </button>
+
+              <button
+                className="record-menu-item"
+                onClick={() => startMeetingRecording(true)}
                 type="button"
               >
                 <div className="record-menu-icon audio">
                   <Mic size={17} />
                 </div>
                 <div className="record-menu-info">
-                  <span className="record-menu-title">Record Meeting Audio</span>
-                  <span className="record-menu-sub">No screen sharing needed. Captures all participant voices.</span>
+                  <span className="record-menu-title">Record Meeting Audio Only</span>
+                  <span className="record-menu-sub">Pure audio recording of all participants and voices.</span>
                 </div>
               </button>
 
               <button
                 className="record-menu-item"
-                onClick={startScreenRecording}
+                onClick={startDesktopRecording}
                 type="button"
               >
-                <div className="record-menu-icon video">
+                <div className="record-menu-icon desktop">
                   <Monitor size={17} />
                 </div>
                 <div className="record-menu-info">
-                  <span className="record-menu-title">Record Screen & Video</span>
-                  <span className="record-menu-sub">Captures your screen, presentations, and meeting video.</span>
+                  <span className="record-menu-title">Record My Desktop Screen</span>
+                  <span className="record-menu-sub">Select your own desktop monitor or specific window.</span>
                 </div>
               </button>
             </div>
