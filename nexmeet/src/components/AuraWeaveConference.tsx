@@ -20,7 +20,9 @@ import {
   Radio,
   UserCheck,
   MessageSquare,
-  Send
+  Send,
+  Hand,
+  Smile
 } from "lucide-react";
 import Brand from "./Brand";
 import ShareMeetingModal from "./ShareMeetingModal";
@@ -47,6 +49,7 @@ export default function AuraWeaveConference({
 
   // In-Meeting Real-Time Chat State
   const [showChat, setShowChat] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [chatInput, setChatInput] = useState("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -68,6 +71,10 @@ export default function AuraWeaveConference({
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
+    toggleRaiseHand,
+    myHandRaised,
+    sendReaction,
+    reactions,
     broadcastCaption,
     setOnCaptionReceived
   } = useAuraWeave({
@@ -444,12 +451,61 @@ export default function AuraWeaveConference({
             <Share2 size={14} />
             <span>{quickCopied ? "Link Copied!" : "Share Link"}</span>
           </button>
+
+          <button
+            type="button"
+            className={`control-btn ${myHandRaised ? "accent" : ""}`}
+            onClick={toggleRaiseHand}
+            title={myHandRaised ? "Lower hand" : "Raise hand"}
+          >
+            <Hand size={18} />
+            <span>{myHandRaised ? "Lower hand" : "Raise hand"}</span>
+          </button>
+
+          <div className="reaction-picker-wrap">
+            <button
+              type="button"
+              className={`control-btn ${showReactions ? "accent" : ""}`}
+              onClick={() => setShowReactions((visible) => !visible)}
+              title="Send reaction"
+              aria-label="Send reaction"
+            >
+              <Smile size={18} />
+              <span>Reactions</span>
+            </button>
+            {showReactions && (
+              <div className="reaction-picker">
+                {["👍", "👏", "😂", "❤️", "🎉", "💡"].map((emoji) => (
+                  <button
+                    type="button"
+                    key={emoji}
+                    onClick={() => {
+                      void sendReaction(emoji);
+                      setShowReactions(false);
+                    }}
+                    aria-label={`Send ${emoji} reaction`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Main Content Area */}
       <div className={`meeting-content ${showChat ? "with-chat" : ""}`}>
         <div className="meeting-stage-area">
+          {reactions.length > 0 && (
+            <div className="meeting-reactions" aria-live="polite">
+              {reactions.map((reaction) => (
+                <span key={reaction.id} className="meeting-reaction" title={reaction.name}>
+                  {reaction.emoji}
+                </span>
+              ))}
+            </div>
+          )}
           {/* Participant video grid */}
           <div className={`auraweave-grid ${gridClass}`}>
             {/* Local participant */}

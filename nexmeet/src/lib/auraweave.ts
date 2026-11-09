@@ -69,7 +69,7 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
     role: "presenter",
     stream,
     isAudioMuted: !participant.isMicrophoneEnabled,
-    isVideoMuted: !participant.isCameraEnabled && !participant.isScreenShareEnabled,
+    isVideoMuted: !participant.isCameraEnabled,
     isScreenSharing: participant.isScreenShareEnabled
   };
 }
@@ -93,14 +93,15 @@ export function useAuraWeave({
   const [totalParticipants, setTotalParticipants] = useState(1);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [handsRaised, setHandsRaised] = useState<HandRaisedUser[]>([]);
+  const [myHandRaised, setMyHandRaised] = useState(false);
+  const [reactions, setReactions] = useState<{ id: string; emoji: string; name: string }[]>([]);
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
   const syncLocal = useCallback(() => {
     setLocalStream(participantStream(room.localParticipant));
     setIsAudioMuted(!room.localParticipant.isMicrophoneEnabled);
-    setIsVideoMuted(
-      !room.localParticipant.isCameraEnabled && !room.localParticipant.isScreenShareEnabled
-    );
+    setIsVideoMuted(!room.localParticipant.isCameraEnabled);
     setIsScreenSharing(room.localParticipant.isScreenShareEnabled);
   }, [room]);
 
@@ -151,6 +152,28 @@ export function useAuraWeave({
           ]);
         } else if (message.type === "caption") {
           onCaptionReceivedRef.current?.(message.speaker, message.text);
+        } else if (message.type === "hand") {
+          const handUser: HandRaisedUser = {
+            peerId: participant?.identity || "",
+            userId: participant?.identity || "",
+            name: participant?.name || "Participant",
+            avatarUrl: ""
+          };
+          setHandsRaised((previous) =>
+            message.raised
+              ? [...previous.filter((item) => item.peerId !== handUser.peerId), handUser]
+              : previous.filter((item) => item.peerId !== handUser.peerId)
+          );
+        } else if (message.type === "reaction" && typeof message.emoji === "string") {
+          const reaction = {
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            emoji: message.emoji,
+            name: participant?.name || "Participant"
+          };
+          setReactions((previous) => [...previous.slice(-4), reaction]);
+          window.setTimeout(() => {
+            setReactions((previous) => previous.filter((item) => item.id !== reaction.id));
+          }, 3000);
         }
       } catch {
         setError("Received invalid meeting data from LiveKit.");
@@ -305,6 +328,41 @@ export function useAuraWeave({
     [room]
   );
 
+  const toggleRaiseHand = useCallback(async () => {
+    const raised = !myHandRaised;
+    setMyHandRaised(raised);
+    await room.localParticipant.publishData(
+      new TextEncoder().encode(JSON.stringify({ type: "hand", raised })),
+      { reliable: true }
+    );
+    setHandsRaised((previous) =>
+      raised
+        ? [...previous.filter((item) => item.peerId !== user?.id), {
+            peerId: user?.id || "",
+            userId: user?.id || "",
+            name: user?.name || "You",
+            avatarUrl: user?.avatarUrl || ""
+          }]
+        : previous.filter((item) => item.peerId !== user?.id)
+    );
+  }, [myHandRaised, room, user]);
+
+  const sendReaction = useCallback(async (emoji: string) => {
+    await room.localParticipant.publishData(
+      new TextEncoder().encode(JSON.stringify({ type: "reaction", emoji })),
+      { reliable: true }
+    );
+    const reaction = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      emoji,
+      name: user?.name || "You"
+    };
+    setReactions((previous) => [...previous.slice(-4), reaction]);
+    window.setTimeout(() => {
+      setReactions((previous) => previous.filter((item) => item.id !== reaction.id));
+    }, 3000);
+  }, [room, user]);
+
   return {
     myPeerId: user?.id || "",
     role: isHost ? "host" as AuraRole : "presenter" as AuraRole,
@@ -313,8 +371,9 @@ export function useAuraWeave({
     peers: Array.from(peers.values()),
     audienceCount: 0,
     totalParticipants,
-    handsRaised: [] as HandRaisedUser[],
-    myHandRaised: false,
+    handsRaised,
+    myHandRaised,
+    reactions,
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
@@ -325,7 +384,8 @@ export function useAuraWeave({
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
-    toggleRaiseHand: () => {},
+    toggleRaiseHand,
+    sendReaction,
     promoteToStage: () => {},
     demoteToAudience: () => {},
     broadcastCaption,
