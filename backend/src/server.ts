@@ -189,7 +189,7 @@ app.post("/api/ai", async (req: Request, res: Response) => {
 
     const prompt = task === "action-items"
       ? "Extract clear, humanized action items from these meeting notes. Highlight owners and next steps naturally. Avoid robotic phrasing."
-      : "Write humanized, professional, and well-structured meeting notes. Use friendly yet executive language with clean bullet points. Include:\n- ✨ Executive Overview\n- 💡 Key Takeaways & Highlights\n- 🚀 Next Steps & Action Items\nMake it feel like a smart Chief of Staff wrote it, not a machine.";
+      : "Write humanized, professional, and well-structured meeting notes from the supplied live transcript and chat. Treat [Transcript] lines as spoken content and [Chat] lines as written participant contributions. Do not invent quotes, speakers, decisions, or action items. Use friendly yet executive language with clean bullet points. Include:\n- ✨ Executive Overview\n- 💡 Key Takeaways & Highlights\n- 🚀 Next Steps & Action Items\n- 💬 Important Chat Contributions\nMake it feel like a smart Chief of Staff wrote it, not a machine.";
 
     // Active high-speed Groq models
     const primaryModel =

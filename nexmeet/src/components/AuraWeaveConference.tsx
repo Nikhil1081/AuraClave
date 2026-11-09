@@ -329,10 +329,14 @@ export default function AuraWeaveConference({
     setAiLoading(true);
     setAiError("");
 
-    const notesText =
-      transcript.length > 0
-        ? transcript.map((t) => `${t.speaker} [${t.time}]: ${t.text}`).join("\n")
-        : `Meeting in room ${roomName} with ${totalParticipants} participants.`;
+    const transcriptText = transcript
+      .map((entry) => `[Transcript] ${entry.speaker} [${entry.time}]: ${entry.text}`)
+      .join("\n");
+    const chatText = chatMessages
+      .map((message) => `[Chat] ${message.senderName} [${message.time}]: ${message.text}`)
+      .join("\n");
+    const notesText = [transcriptText, chatText].filter(Boolean).join("\n") ||
+      `Meeting in room ${roomName} with ${totalParticipants} participants.`;
 
     try {
       const base = getApiBase();
@@ -342,7 +346,10 @@ export default function AuraWeaveConference({
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ text: notesText, task: "summarize" })
+        body: JSON.stringify({
+          text: notesText.slice(-20000),
+          task: "summarize"
+        })
       });
 
       const data = await res.json();
@@ -353,6 +360,28 @@ export default function AuraWeaveConference({
     } finally {
       setAiLoading(false);
     }
+  };
+
+  const downloadMeetingTranscript = () => {
+    const transcriptText = transcript
+      .map((entry) => `[Transcript] ${entry.speaker} [${entry.time}]: ${entry.text}`)
+      .join("\n");
+    const chatText = chatMessages
+      .map((message) => `[Chat] ${message.senderName} [${message.time}]: ${message.text}`)
+      .join("\n");
+    const content = [
+      `AuraClave meeting: ${roomName}`,
+      `Exported: ${new Date().toLocaleString()}`,
+      "",
+      transcriptText || "No live transcript was captured.",
+      chatText ? `\n${chatText}` : "\nNo chat messages were captured."
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `AuraClave-${roomName}-transcript.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleLeave = () => {
@@ -622,10 +651,10 @@ export default function AuraWeaveConference({
               type="button"
               className={`control-btn ${captionsEnabled ? "accent" : ""}`}
               onClick={() => setCaptionsEnabled(!captionsEnabled)}
-              title="Live Closed Captions"
+              title="Capture live transcript"
             >
               <Subtitles size={18} />
-              <span>CC</span>
+              <span>Live Transcript</span>
             </button>
 
             <button
@@ -704,6 +733,10 @@ export default function AuraWeaveConference({
             </div>
 
             <div className="ai-modal-body">
+              <div className="ai-source-summary">
+                Using {transcript.length} live transcript entries and {chatMessages.length} chat messages.
+                Turn on <strong>Live Transcript</strong> during the meeting to capture spoken content.
+              </div>
               {aiLoading ? (
                 <div className="ai-loading-state">
                   <LoaderCircle className="spin" size={28} />
@@ -727,18 +760,28 @@ export default function AuraWeaveConference({
                 Close
               </button>
               {aiSummary && (
-                <button
-                  type="button"
-                  className="button primary"
-                  onClick={() => {
-                    navigator.clipboard.writeText(aiSummary);
-                    setAiCopied(true);
-                    setTimeout(() => setAiCopied(false), 2000);
-                  }}
-                >
-                  {aiCopied ? <Check size={16} /> : <Copy size={16} />}
-                  <span>{aiCopied ? "Copied" : "Copy Notes"}</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={downloadMeetingTranscript}
+                  >
+                    <Copy size={16} />
+                    <span>Export Transcript & Chat</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={() => {
+                      navigator.clipboard.writeText(aiSummary);
+                      setAiCopied(true);
+                      setTimeout(() => setAiCopied(false), 2000);
+                    }}
+                  >
+                    {aiCopied ? <Check size={16} /> : <Copy size={16} />}
+                    <span>{aiCopied ? "Copied" : "Copy Notes"}</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
