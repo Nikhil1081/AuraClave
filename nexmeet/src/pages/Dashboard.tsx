@@ -24,7 +24,11 @@ export default function Dashboard() {
   const initial = firstName[0]?.toUpperCase() || "U";
 
   function createMeeting() {
-    navigate(`/meeting/${makeRoom()}`);
+    const room = makeRoom();
+    try {
+      sessionStorage.setItem(`auraclave_host_${room}`, "true");
+    } catch {}
+    navigate(`/meeting/${room}`, { state: { isHost: true } });
   }
 
   const _copyInvite = async () => {

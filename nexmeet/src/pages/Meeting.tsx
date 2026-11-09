@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from "@livekit/components-react";
 import { LoaderCircle, Share2 } from "lucide-react";
 import Brand from "../components/Brand";
@@ -19,13 +19,18 @@ function getApiBase(): string {
 
 export default function Meeting() {
   const { roomName = "" } = useParams();
+  const location = useLocation();
   const { session } = useAuth();
+  const isCreatedByMe = Boolean(
+    (location.state as any)?.isHost ||
+    (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`auraclave_host_${roomName}`) === "true")
+  );
   const [token, setToken] = useState("");
   const [serverUrl, setServerUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [admissionStatus, setAdmissionStatus] = useState<"checking" | "admitted" | "waiting" | "rejected">("checking");
-  const [isHost, setIsHost] = useState(false);
+  const [isHost, setIsHost] = useState(isCreatedByMe);
   const [showShareModal, setShowShareModal] = useState(false);
   const [quickCopied, setQuickCopied] = useState(false);
   const pollTimerRef = useRef<any>(null);
@@ -54,8 +59,9 @@ export default function Meeting() {
         });
 
         if (!res.ok) {
-          // If room admission endpoint is not supported yet, fallback to direct admission
+          // Fallback to direct admission and preserve host status
           if (active) {
+            setIsHost(isCreatedByMe);
             setAdmissionStatus("admitted");
             fetchToken();
           }
