@@ -1,6 +1,8 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server as HttpServer } from "http";
 
+export type AuraRole = "host" | "presenter" | "audience";
+
 export interface AuraWeaveParticipant {
   ws: WebSocket;
   peerId: string;
@@ -8,6 +10,8 @@ export interface AuraWeaveParticipant {
   name: string;
   avatarUrl: string;
   roomName: string;
+  role: AuraRole;
+  raisedHand: boolean;
   isAudioMuted: boolean;
   isVideoMuted: boolean;
   isScreenSharing: boolean;
@@ -32,7 +36,7 @@ export class AuraWeaveSignaler {
 
           switch (type) {
             case "join": {
-              const { roomName, userId, name, avatarUrl } = data;
+              const { roomName, userId, name, avatarUrl, isHost } = data;
               if (!roomName || !userId) return;
 
               currentRoomName = roomName;
@@ -43,6 +47,10 @@ export class AuraWeaveSignaler {
               }
 
               const room = this.rooms.get(roomName)!;
+              const isFirst = room.size === 0;
+
+              // First participant or designated host gets "host" / "presenter" role, others start in "audience"
+              const assignedRole: AuraRole = isHost || isFirst ? "host" : "audience";
 
               const participant: AuraWeaveParticipant = {
                 ws,
@@ -51,52 +59,81 @@ export class AuraWeaveSignaler {
                 name: name || "Guest",
                 avatarUrl: avatarUrl || "",
                 roomName,
-                isAudioMuted: false,
-                isVideoMuted: false,
+                role: assignedRole,
+                raisedHand: false,
+                isAudioMuted: assignedRole === "audience",
+                isVideoMuted: assignedRole === "audience",
                 isScreenSharing: false,
                 lastPing: Date.now()
               };
 
-              // Collect existing participants to send to the newly joined peer
-              const existingPeers = Array.from(room.values()).map(p => ({
-                peerId: p.peerId,
-                userId: p.userId,
-                name: p.name,
-                avatarUrl: p.avatarUrl,
-                isAudioMuted: p.isAudioMuted,
-                isVideoMuted: p.isVideoMuted,
-                isScreenSharing: p.isScreenSharing
-              }));
-
               room.set(currentPeerId, participant);
 
-              // 1. Reply to joining peer with their assigned peerId and list of other peers
+              // Extract stage members (host + presenters) and audience stats
+              const stageMembers: any[] = [];
+              const handsRaised: any[] = [];
+              let audienceCount = 0;
+
+              room.forEach((p) => {
+                if (p.role === "host" || p.role === "presenter") {
+                  stageMembers.push({
+                    peerId: p.peerId,
+                    userId: p.userId,
+                    name: p.name,
+                    avatarUrl: p.avatarUrl,
+                    role: p.role,
+                    isAudioMuted: p.isAudioMuted,
+                    isVideoMuted: p.isVideoMuted,
+                    isScreenSharing: p.isScreenSharing
+                  });
+                } else {
+                  audienceCount++;
+                }
+
+                if (p.raisedHand) {
+                  handsRaised.push({
+                    peerId: p.peerId,
+                    userId: p.userId,
+                    name: p.name,
+                    avatarUrl: p.avatarUrl
+                  });
+                }
+              });
+
+              // 1. Reply to joining participant
               this.send(ws, {
                 type: "joined",
                 data: {
                   peerId: currentPeerId,
-                  peers: existingPeers
+                  role: assignedRole,
+                  stageMembers,
+                  totalAudience: audienceCount,
+                  totalRoomMembers: room.size,
+                  handsRaised
                 }
               });
 
-              // 2. Notify other peers in this room that a new peer joined
-              this.broadcast(roomName, currentPeerId, {
-                type: "peer-joined",
-                data: {
-                  peerId: currentPeerId,
-                  userId: participant.userId,
-                  name: participant.name,
-                  avatarUrl: participant.avatarUrl,
-                  isAudioMuted: false,
-                  isVideoMuted: false,
-                  isScreenSharing: false
-                }
-              });
+              // 2. Broadcast updated room status and presence to all participants
+              this.broadcastRoomSummary(roomName);
+
+              // 3. Notify stage peers if a new presenter/host joined
+              if (assignedRole !== "audience") {
+                this.broadcast(roomName, currentPeerId, {
+                  type: "stage-member-added",
+                  data: {
+                    peerId: currentPeerId,
+                    userId: participant.userId,
+                    name: participant.name,
+                    avatarUrl: participant.avatarUrl,
+                    role: assignedRole
+                  }
+                });
+              }
               break;
             }
 
             case "signal": {
-              // Route SDP offers, answers, and ICE candidates directly to targetPeerId
+              // Direct WebRTC SDP offer, answer, or ICE candidate routing
               const { targetPeerId, signal } = data;
               if (!targetPeerId || !currentRoomName) return;
 
@@ -115,14 +152,72 @@ export class AuraWeaveSignaler {
               break;
             }
 
+            case "raise-hand": {
+              // Audience member raises or lowers hand
+              const { raised } = data;
+              const room = this.rooms.get(currentRoomName);
+              const me = room?.get(currentPeerId);
+              if (me) {
+                me.raisedHand = Boolean(raised);
+                this.broadcastRoomSummary(currentRoomName);
+              }
+              break;
+            }
+
+            case "promote-to-stage": {
+              // Host promotes an audience member to presenter
+              const { targetPeerId } = data;
+              const room = this.rooms.get(currentRoomName);
+              const me = room?.get(currentPeerId);
+              const target = room?.get(targetPeerId);
+
+              if (me?.role === "host" && target) {
+                target.role = "presenter";
+                target.raisedHand = false;
+                target.isAudioMuted = false;
+                target.isVideoMuted = false;
+
+                // Notify target directly
+                this.send(target.ws, {
+                  type: "role-changed",
+                  data: { role: "presenter" }
+                });
+
+                this.broadcastRoomSummary(currentRoomName);
+              }
+              break;
+            }
+
+            case "demote-to-audience": {
+              // Host returns presenter to audience
+              const { targetPeerId } = data;
+              const room = this.rooms.get(currentRoomName);
+              const me = room?.get(currentPeerId);
+              const target = room?.get(targetPeerId);
+
+              if (me?.role === "host" && target && target.role !== "host") {
+                target.role = "audience";
+                target.isAudioMuted = true;
+                target.isVideoMuted = true;
+                target.isScreenSharing = false;
+
+                this.send(target.ws, {
+                  type: "role-changed",
+                  data: { role: "audience" }
+                });
+
+                this.broadcastRoomSummary(currentRoomName);
+              }
+              break;
+            }
+
             case "media-state": {
-              // Broadcast mute/camera/screen states to other peers
               const { isAudioMuted, isVideoMuted, isScreenSharing } = data;
               if (!currentRoomName) return;
 
               const room = this.rooms.get(currentRoomName);
               const me = room?.get(currentPeerId);
-              if (me) {
+              if (me && me.role !== "audience") {
                 if (typeof isAudioMuted === "boolean") me.isAudioMuted = isAudioMuted;
                 if (typeof isVideoMuted === "boolean") me.isVideoMuted = isVideoMuted;
                 if (typeof isScreenSharing === "boolean") me.isScreenSharing = isScreenSharing;
@@ -140,13 +235,27 @@ export class AuraWeaveSignaler {
               break;
             }
 
+            case "caption-broadcast": {
+              // Broadcast live closed captions to all 1,000 participants
+              if (!currentRoomName) return;
+              this.broadcast(currentRoomName, currentPeerId, {
+                type: "live-caption",
+                data: {
+                  speaker: data.speaker,
+                  text: data.text,
+                  time: data.time || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                }
+              });
+              break;
+            }
+
             case "ping": {
               this.send(ws, { type: "pong", data: { time: Date.now() } });
               break;
             }
           }
         } catch (err) {
-          console.error("AuraWeave signal error:", err);
+          console.error("AuraWeave broadcast error:", err);
         }
       });
 
@@ -159,7 +268,7 @@ export class AuraWeaveSignaler {
       });
     });
 
-    // Heartbeat cleanup every 30 seconds
+    // Heartbeat cleanup every 25 seconds
     setInterval(() => {
       this.rooms.forEach((room, roomName) => {
         room.forEach((p, peerId) => {
@@ -168,7 +277,7 @@ export class AuraWeaveSignaler {
           }
         });
       });
-    }, 30000);
+    }, 25000);
   }
 
   private send(ws: WebSocket, payload: any) {
@@ -188,6 +297,57 @@ export class AuraWeaveSignaler {
     });
   }
 
+  private broadcastRoomSummary(roomName: string) {
+    const room = this.rooms.get(roomName);
+    if (!room) return;
+
+    const stageMembers: any[] = [];
+    const handsRaised: any[] = [];
+    let audienceCount = 0;
+
+    room.forEach((p) => {
+      if (p.role === "host" || p.role === "presenter") {
+        stageMembers.push({
+          peerId: p.peerId,
+          userId: p.userId,
+          name: p.name,
+          avatarUrl: p.avatarUrl,
+          role: p.role,
+          isAudioMuted: p.isAudioMuted,
+          isVideoMuted: p.isVideoMuted,
+          isScreenSharing: p.isScreenSharing
+        });
+      } else {
+        audienceCount++;
+      }
+
+      if (p.raisedHand) {
+        handsRaised.push({
+          peerId: p.peerId,
+          userId: p.userId,
+          name: p.name,
+          avatarUrl: p.avatarUrl
+        });
+      }
+    });
+
+    const summary = {
+      type: "room-summary",
+      data: {
+        stageMembers,
+        audienceCount,
+        totalParticipants: room.size,
+        handsRaised
+      }
+    };
+
+    room.forEach((p) => {
+      if (p.ws.readyState === WebSocket.OPEN) {
+        p.ws.send(JSON.stringify(summary));
+      }
+    });
+  }
+
   private removeParticipant(roomName: string, peerId: string) {
     if (!roomName || !peerId) return;
     const room = this.rooms.get(roomName);
@@ -200,6 +360,7 @@ export class AuraWeaveSignaler {
           type: "peer-left",
           data: { peerId }
         });
+        this.broadcastRoomSummary(roomName);
       }
     }
   }

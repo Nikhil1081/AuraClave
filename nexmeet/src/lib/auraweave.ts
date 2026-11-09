@@ -1,15 +1,25 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getApiBase } from "./auth";
 
+export type AuraRole = "host" | "presenter" | "audience";
+
 export interface AuraWeavePeer {
   peerId: string;
   userId: string;
   name: string;
   avatarUrl: string;
+  role: AuraRole;
   stream?: MediaStream;
   isAudioMuted: boolean;
   isVideoMuted: boolean;
   isScreenSharing: boolean;
+}
+
+export interface HandRaisedUser {
+  peerId: string;
+  userId: string;
+  name: string;
+  avatarUrl: string;
 }
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -33,13 +43,20 @@ function getAuraWeaveWsUrl(): string {
 
 export function useAuraWeave({
   roomName,
-  user
+  user,
+  isHost
 }: {
   roomName: string;
   user: { id: string; name: string; avatarUrl?: string } | null;
+  isHost: boolean;
 }) {
+  const [role, setRole] = useState<AuraRole>(isHost ? "host" : "audience");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peers, setPeers] = useState<Map<string, AuraWeavePeer>>(new Map());
+  const [audienceCount, setAudienceCount] = useState<number>(0);
+  const [totalParticipants, setTotalParticipants] = useState<number>(1);
+  const [handsRaised, setHandsRaised] = useState<HandRaisedUser[]>([]);
+  const [myHandRaised, setMyHandRaised] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -53,48 +70,63 @@ export function useAuraWeave({
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const queuedCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
-  // 1. Initialize Local Camera and Microphone
+  const isStageMember = role === "host" || role === "presenter";
+
+  // 1. Initialize Local Media only when on Stage (Host / Presenter)
   useEffect(() => {
     let active = true;
 
     async function initMedia() {
+      if (!isStageMember) {
+        // Audience members do not publish camera or microphone
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach((t) => t.stop());
+          localStreamRef.current = null;
+          setLocalStream(null);
+        }
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          },
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: "user"
-          }
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
         });
 
         if (!active) {
-          stream.getTracks().forEach(t => t.stop());
+          stream.getTracks().forEach((t) => t.stop());
           return;
         }
 
         localStreamRef.current = stream;
         cameraTrackRef.current = stream.getVideoTracks()[0] || null;
         setLocalStream(stream);
+
+        // Attach local tracks to all existing peer connections
+        peerConnectionsRef.current.forEach((pc) => {
+          stream.getTracks().forEach((track) => {
+            const senders = pc.getSenders();
+            const exists = senders.some((s) => s.track?.kind === track.kind);
+            if (!exists) {
+              pc.addTrack(track, stream);
+            }
+          });
+        });
       } catch (err: any) {
         console.warn("Could not acquire video & audio, falling back to audio only:", err);
         try {
           const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           if (!active) {
-            audioStream.getTracks().forEach(t => t.stop());
+            audioStream.getTracks().forEach((t) => t.stop());
             return;
           }
           localStreamRef.current = audioStream;
           setIsVideoMuted(true);
           setLocalStream(audioStream);
-        } catch (audioErr: any) {
-          console.error("No media devices accessible:", audioErr);
-          setError("Microphone/camera access denied. You can still join to listen.");
+        } catch {
+          setError("Microphone/camera access denied. You can still participate in the audience.");
         }
       }
     }
@@ -104,11 +136,11 @@ export function useAuraWeave({
     return () => {
       active = false;
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
       }
     };
-  }, []);
+  }, [isStageMember]);
 
   // 2. Connect to AuraWeave Signaling Server
   useEffect(() => {
@@ -122,7 +154,6 @@ export function useAuraWeave({
       setConnected(true);
       setError(null);
 
-      // Join room with user metadata
       ws.send(
         JSON.stringify({
           type: "join",
@@ -130,7 +161,8 @@ export function useAuraWeave({
             roomName,
             userId: user.id,
             name: user.name || "Guest",
-            avatarUrl: user.avatarUrl || ""
+            avatarUrl: user.avatarUrl || "",
+            isHost
           }
         })
       );
@@ -144,20 +176,45 @@ export function useAuraWeave({
         switch (type) {
           case "joined": {
             myPeerIdRef.current = data.peerId;
+            setRole(data.role);
+            setAudienceCount(data.totalAudience || 0);
+            setTotalParticipants(data.totalRoomMembers || 1);
+            setHandsRaised(data.handsRaised || []);
 
-            // Existing peers in the room: initiate polite WebRTC connections to each
-            const existingPeers: any[] = data.peers || [];
-            existingPeers.forEach((p) => {
+            // Connect to active stage members
+            const stageMembers: any[] = data.stageMembers || [];
+            stageMembers.forEach((p) => {
               addPeerState(p);
-              createPeerConnection(p.peerId, true); // We initiate offer to existing peers
+              // Stage members or audience establish WebRTC connection to download stage video
+              createPeerConnection(p.peerId, true);
             });
             break;
           }
 
-          case "peer-joined": {
-            // New peer joined after us
+          case "stage-member-added": {
             addPeerState(data);
-            createPeerConnection(data.peerId, false); // Wait for their offer
+            createPeerConnection(data.peerId, false);
+            break;
+          }
+
+          case "role-changed": {
+            setRole(data.role);
+            if (data.role === "audience") {
+              setMyHandRaised(false);
+            }
+            break;
+          }
+
+          case "room-summary": {
+            setAudienceCount(data.audienceCount || 0);
+            setTotalParticipants(data.totalParticipants || 1);
+            setHandsRaised(data.handsRaised || []);
+
+            // Synchronize stage members
+            const stageMembers: any[] = data.stageMembers || [];
+            stageMembers.forEach((sm) => {
+              addPeerState(sm);
+            });
             break;
           }
 
@@ -184,6 +241,13 @@ export function useAuraWeave({
             break;
           }
 
+          case "live-caption": {
+            if (onCaptionReceivedRef.current) {
+              onCaptionReceivedRef.current(data.speaker, data.text);
+            }
+            break;
+          }
+
           case "peer-left": {
             removePeer(data.peerId);
             break;
@@ -194,15 +258,9 @@ export function useAuraWeave({
       }
     };
 
-    ws.onerror = (err) => {
-      console.warn("AuraWeave WebSocket error:", err);
-    };
+    ws.onerror = () => {};
+    ws.onclose = () => setConnected(false);
 
-    ws.onclose = () => {
-      setConnected(false);
-    };
-
-    // Ping every 20 seconds to prevent timeout
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "ping" }));
@@ -215,12 +273,13 @@ export function useAuraWeave({
       peerConnectionsRef.current.forEach((pc) => pc.close());
       peerConnectionsRef.current.clear();
     };
-  }, [roomName, user?.id]);
+  }, [roomName, user?.id, isHost]);
 
   const addPeerState = (peer: AuraWeavePeer) => {
     setPeers((prev) => {
       const next = new Map(prev);
-      next.set(peer.peerId, { ...peer });
+      const existing = next.get(peer.peerId);
+      next.set(peer.peerId, { ...existing, ...peer });
       return next;
     });
   };
@@ -247,14 +306,13 @@ export function useAuraWeave({
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peerConnectionsRef.current.set(targetPeerId, pc);
 
-    // Add local tracks to peer connection
-    if (localStreamRef.current) {
+    // Only add local tracks if we are on the Stage (Host / Presenter)
+    if (isStageMember && localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current!);
       });
     }
 
-    // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
@@ -269,7 +327,6 @@ export function useAuraWeave({
       }
     };
 
-    // Handle incoming remote media tracks
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0] || new MediaStream([event.track]);
       setPeers((prev) => {
@@ -282,7 +339,6 @@ export function useAuraWeave({
       });
     };
 
-    // Polite negotiation handling
     pc.onnegotiationneeded = async () => {
       if (!isInitiator) return;
       try {
@@ -317,7 +373,6 @@ export function useAuraWeave({
       if (signal.sdp) {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
 
-        // Flush any queued ICE candidates for this peer
         const queued = queuedCandidatesRef.current.get(senderPeerId) || [];
         for (const cand of queued) {
           await pc.addIceCandidate(new RTCIceCandidate(cand));
@@ -343,7 +398,6 @@ export function useAuraWeave({
         if (pc.remoteDescription && pc.remoteDescription.type) {
           await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
         } else {
-          // Queue candidate until remote description is ready
           const currentQueue = queuedCandidatesRef.current.get(senderPeerId) || [];
           currentQueue.push(signal.candidate);
           queuedCandidatesRef.current.set(senderPeerId, currentQueue);
@@ -397,7 +451,6 @@ export function useAuraWeave({
     if (!localStreamRef.current) return;
 
     if (isScreenSharing) {
-      // Revert to camera
       if (screenTrackRef.current) {
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
@@ -422,7 +475,6 @@ export function useAuraWeave({
         );
       }
     } else {
-      // Start Screen Share
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
@@ -435,7 +487,6 @@ export function useAuraWeave({
           toggleScreenShare();
         };
 
-        // Replace outgoing video track on all peer connections
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (sender) {
@@ -459,9 +510,66 @@ export function useAuraWeave({
     }
   }, [isScreenSharing]);
 
+  // 5. Stage & Audience Actions for 1,000 Capacity
+  const toggleRaiseHand = useCallback(() => {
+    const nextState = !myHandRaised;
+    setMyHandRaised(nextState);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "raise-hand",
+          data: { raised: nextState }
+        })
+      );
+    }
+  }, [myHandRaised]);
+
+  const promoteToStage = useCallback((targetPeerId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "promote-to-stage",
+          data: { targetPeerId }
+        })
+      );
+    }
+  }, []);
+
+  const demoteToAudience = useCallback((targetPeerId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "demote-to-audience",
+          data: { targetPeerId }
+        })
+      );
+    }
+  }, []);
+
+  const broadcastCaption = useCallback((speaker: string, text: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "caption-broadcast",
+          data: { speaker, text }
+        })
+      );
+    }
+  }, []);
+
+  const setOnCaptionReceived = (fn: (speaker: string, text: string) => void) => {
+    onCaptionReceivedRef.current = fn;
+  };
+
   return {
+    role,
+    isStageMember,
     localStream,
-    peers: Array.from(peers.values()),
+    peers: Array.from(peers.values()).filter((p) => p.role === "host" || p.role === "presenter"),
+    audienceCount,
+    totalParticipants,
+    handsRaised,
+    myHandRaised,
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
@@ -469,6 +577,11 @@ export function useAuraWeave({
     error,
     toggleAudio,
     toggleVideo,
-    toggleScreenShare
+    toggleScreenShare,
+    toggleRaiseHand,
+    promoteToStage,
+    demoteToAudience,
+    broadcastCaption,
+    setOnCaptionReceived
   };
 }

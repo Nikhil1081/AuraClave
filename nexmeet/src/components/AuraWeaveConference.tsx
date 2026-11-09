@@ -14,10 +14,14 @@ import {
   Square,
   Copy,
   Check,
-  Download,
   LoaderCircle,
   X,
-  ShieldCheck
+  Hand,
+  Users,
+  Radio,
+  ArrowUpRight,
+  ArrowDownLeft,
+  UserCheck
 } from "lucide-react";
 import Brand from "./Brand";
 import ShareMeetingModal from "./ShareMeetingModal";
@@ -41,11 +45,18 @@ export default function AuraWeaveConference({
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [quickCopied, setQuickCopied] = useState(false);
+  const [showHandsModal, setShowHandsModal] = useState(false);
 
-  // AuraWeave RTC Engine Hook
+  // AuraWeave 1,000-Participant Engine Hook
   const {
+    role,
+    isStageMember,
     localStream,
     peers,
+    audienceCount,
+    totalParticipants,
+    handsRaised,
+    myHandRaised,
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
@@ -53,7 +64,12 @@ export default function AuraWeaveConference({
     error: rtcError,
     toggleAudio,
     toggleVideo,
-    toggleScreenShare
+    toggleScreenShare,
+    toggleRaiseHand,
+    promoteToStage,
+    demoteToAudience,
+    broadcastCaption,
+    setOnCaptionReceived
   } = useAuraWeave({
     roomName,
     user: user
@@ -62,7 +78,8 @@ export default function AuraWeaveConference({
           name: user.user_metadata?.full_name || user.email || "You",
           avatarUrl: user.user_metadata?.avatar_url || ""
         }
-      : null
+      : null,
+    isHost
   });
 
   // Local Video Ref
@@ -73,30 +90,34 @@ export default function AuraWeaveConference({
     }
   }, [localStream]);
 
-  // Captions state (Web Speech API)
+  // Captions state
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [currentCaption, setCurrentCaption] = useState<{ speaker: string; text: string } | null>(null);
   const [transcript, setTranscript] = useState<{ speaker: string; text: string; time: string }[]>([]);
   const recognitionRef = useRef<any>(null);
   const captionTimeoutRef = useRef<any>(null);
 
-  // Recording state (Zero-Prompt Web Audio + MediaRecorder)
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
-  const recordIntervalRef = useRef<any>(null);
-
-  // AI Notes state
-  const [showAiModal, setShowAiModal] = useState(false);
-  const [aiSummary, setAiSummary] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
-  const [aiCopied, setAiCopied] = useState(false);
-
-  // 1. Live Captions via SpeechRecognition
+  // Setup broadcasted captions listener
   useEffect(() => {
-    if (!captionsEnabled) {
+    setOnCaptionReceived((speaker, text) => {
+      setCurrentCaption({ speaker, text });
+      if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
+      captionTimeoutRef.current = setTimeout(() => setCurrentCaption(null), 4000);
+
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker,
+          text,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }
+      ]);
+    });
+  }, []);
+
+  // Web Speech Recognition for Stage Members
+  useEffect(() => {
+    if (!captionsEnabled || !isStageMember) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
@@ -110,7 +131,6 @@ export default function AuraWeaveConference({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Live captions: Speech recognition is not supported in this browser. Please use Google Chrome or Edge.");
       setCaptionsEnabled(false);
       return;
     }
@@ -135,13 +155,14 @@ export default function AuraWeaveConference({
       const text = (final || interim).trim();
       if (!text) return;
 
-      const myName = user?.user_metadata?.full_name || user?.email || "You";
+      const myName = user?.user_metadata?.full_name || user?.email || "Speaker";
       setCurrentCaption({ speaker: myName, text });
 
       if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
       captionTimeoutRef.current = setTimeout(() => setCurrentCaption(null), 4000);
 
       if (final.trim()) {
+        broadcastCaption(myName, final.trim());
         setTranscript((prev) => [
           ...prev,
           {
@@ -155,7 +176,7 @@ export default function AuraWeaveConference({
 
     recognition.onerror = () => {};
     recognition.onend = () => {
-      if (captionsEnabled) {
+      if (captionsEnabled && isStageMember) {
         try {
           recognition.start();
         } catch {}
@@ -172,12 +193,17 @@ export default function AuraWeaveConference({
         recognition.stop();
       } catch {}
     };
-  }, [captionsEnabled, currentSpeechCode, user]);
+  }, [captionsEnabled, currentSpeechCode, isStageMember, user]);
 
-  // 2. Zero-Prompt Recording via Web Audio API + MediaRecorder
+  // Zero-Prompt Recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordIntervalRef = useRef<any>(null);
+
   const toggleRecording = async () => {
     if (isRecording) {
-      // Stop recording
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
@@ -185,19 +211,16 @@ export default function AuraWeaveConference({
       setIsRecording(false);
       setRecordingSeconds(0);
     } else {
-      // Start recording
       try {
         const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
         const audioCtx = new AudioCtxClass();
         const dest = audioCtx.createMediaStreamDestination();
 
-        // Add local mic
         if (localStream && localStream.getAudioTracks().length > 0) {
           const micSource = audioCtx.createMediaStreamSource(localStream);
           micSource.connect(dest);
         }
 
-        // Add peer audio streams
         peers.forEach((p) => {
           if (p.stream && p.stream.getAudioTracks().length > 0) {
             try {
@@ -207,10 +230,11 @@ export default function AuraWeaveConference({
           }
         });
 
-        // Determine video track to record (screen share or local video)
         let videoTrack: MediaStreamTrack | null = null;
         if (localStream && localStream.getVideoTracks().length > 0) {
           videoTrack = localStream.getVideoTracks()[0];
+        } else if (peers.length > 0 && peers[0].stream?.getVideoTracks().length) {
+          videoTrack = peers[0].stream.getVideoTracks()[0];
         }
 
         const combinedStream = videoTrack
@@ -255,12 +279,18 @@ export default function AuraWeaveConference({
         }, 1000);
       } catch (err) {
         console.error("Recording error:", err);
-        alert("Could not start recording: " + (err as Error).message);
+        alert("Recording error: " + (err as Error).message);
       }
     }
   };
 
-  // 3. AI Notes Generation with Groq
+  // AI Notes Generation
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiCopied, setAiCopied] = useState(false);
+
   const handleGenerateAiNotes = async () => {
     setShowAiModal(true);
     setAiLoading(true);
@@ -269,7 +299,7 @@ export default function AuraWeaveConference({
     const notesText =
       transcript.length > 0
         ? transcript.map((t) => `${t.speaker} [${t.time}]: ${t.text}`).join("\n")
-        : `Meeting in room ${roomName} with ${peers.length + 1} participants. Topics discussed include ongoing project planning, roadmap reviews, and deliverables.`;
+        : `Meeting in room ${roomName} with ${totalParticipants} total attendees. Presenters and host leading discussion.`;
 
     try {
       const base = getApiBase();
@@ -278,10 +308,7 @@ export default function AuraWeaveConference({
 
       const res = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text: notesText, task: "summarize" })
       });
 
@@ -309,19 +336,19 @@ export default function AuraWeaveConference({
   const myAvatar = user?.user_metadata?.avatar_url || "";
   const myInitial = (myName.trim() || "U")[0].toUpperCase();
 
-  const totalParticipants = 1 + peers.length;
+  const stageMembersCount = (isStageMember ? 1 : 0) + peers.length;
   const gridClass =
-    totalParticipants === 1
+    stageMembersCount <= 1
       ? "grid-1"
-      : totalParticipants === 2
+      : stageMembersCount === 2
       ? "grid-2"
-      : totalParticipants <= 4
+      : stageMembersCount <= 4
       ? "grid-4"
       : "grid-multi";
 
   return (
     <div className="meeting-page">
-      {/* Top Header */}
+      {/* Header */}
       <header className="meeting-header">
         <Link to="/dashboard" className="meeting-brand">
           <Brand small />
@@ -330,20 +357,37 @@ export default function AuraWeaveConference({
         </Link>
 
         <div className="meeting-header-actions">
-          {/* AuraWeave Brand Indicator */}
-          <div className="auraweave-badge" title="Powered by 100% Free AuraWeave Peer-to-Peer Mesh">
-            <span className="auraweave-dot" />
-            <span>AuraWeave RTC™</span>
+          {/* AuraWeave 1,000 Capacity Badge */}
+          <div className="auraweave-badge" title="AuraWeave RTC™ 1,000 Capacity Stage & Audience Mesh">
+            <Radio size={13} className="text-emerald-400 animate-pulse" />
+            <span>AuraWeave 1K Stage</span>
           </div>
+
+          {/* Live Audience Counter */}
+          <div className="audience-pill" title={`${totalParticipants} total participants in this call`}>
+            <Users size={13} />
+            <span>{totalParticipants} Live ({audienceCount} Audience)</span>
+          </div>
+
+          {/* Hands Raised Indicator for Host */}
+          {role === "host" && handsRaised.length > 0 && (
+            <button
+              type="button"
+              className="hands-raised-indicator-btn"
+              onClick={() => setShowHandsModal(true)}
+              title={`${handsRaised.length} audience member(s) raised hand`}
+            >
+              <Hand size={14} className="hand-bounce" />
+              <span>{handsRaised.length} Raised</span>
+            </button>
+          )}
 
           <div className="meeting-room-id">
             <span className="status-dot" /> {roomName}
           </div>
 
-          {/* Host Admission Pill */}
           {isHost && <HostAdmissionBanner roomName={roomName} />}
 
-          {/* Share Pill */}
           <button
             className={`meeting-share-pill ${quickCopied ? "copied" : ""}`}
             onClick={() => setShowShareModal(true)}
@@ -355,48 +399,82 @@ export default function AuraWeaveConference({
         </div>
       </header>
 
-      {/* Main Video Conference Grid */}
+      {/* Main Content Area */}
       <div className="meeting-content">
+        {/* Audience Status Notification Banner */}
+        {!isStageMember && (
+          <div className="audience-status-banner">
+            <div className="flex items-center gap-2">
+              <span className="live-dot" />
+              <span>
+                You are currently in the <strong>Audience</strong> (watching in HD). Click <strong>Raise Hand</strong> below to speak on stage.
+              </span>
+            </div>
+            {myHandRaised && (
+              <span className="hand-raised-badge">
+                <Hand size={13} /> Hand Raised — Waiting for Host
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Stage Video Grid */}
         <div className={`auraweave-grid ${gridClass}`}>
-          {/* 1. Local Participant Tile */}
-          <div className="auraweave-tile local-tile">
-            {!isVideoMuted && localStream ? (
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
-              />
-            ) : (
-              <div className="tile-placeholder">
-                {myAvatar ? (
-                  <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+          {/* Local Tile (if on Stage) */}
+          {isStageMember && (
+            <div className="auraweave-tile local-tile">
+              {!isVideoMuted && localStream ? (
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
+                />
+              ) : (
+                <div className="tile-placeholder">
+                  {myAvatar ? (
+                    <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+                  ) : (
+                    <div className="tile-avatar-fallback">{myInitial}</div>
+                  )}
+                </div>
+              )}
+
+              <div className="tile-meta">
+                <span className="tile-name">{myName} (You • {role === "host" ? "Host" : "Presenter"})</span>
+                {isAudioMuted ? (
+                  <MicOff size={14} className="tile-muted-icon" />
                 ) : (
-                  <div className="tile-avatar-fallback">{myInitial}</div>
+                  <Mic size={14} className="tile-mic-icon" />
                 )}
               </div>
-            )}
 
-            <div className="tile-meta">
-              <span className="tile-name">{myName} (You)</span>
-              {isAudioMuted ? (
-                <MicOff size={14} className="tile-muted-icon" />
-              ) : (
-                <Mic size={14} className="tile-mic-icon" />
-              )}
+              {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
             </div>
+          )}
 
-            {isScreenSharing && <div className="tile-screen-badge">Presenting</div>}
-          </div>
-
-          {/* 2. Remote Participant Tiles */}
+          {/* Remote Stage Peers */}
           {peers.map((peer) => (
-            <RemotePeerTile key={peer.peerId} peer={peer} />
+            <RemoteStagePeerTile
+              key={peer.peerId}
+              peer={peer}
+              isHost={role === "host"}
+              onDemote={() => demoteToAudience(peer.peerId)}
+            />
           ))}
+
+          {/* Empty Stage Placeholder if Audience with no Active Presenter */}
+          {!isStageMember && peers.length === 0 && (
+            <div className="empty-stage-box">
+              <Radio size={36} className="text-violet-400 mb-2" />
+              <h3>The Stage is Ready</h3>
+              <p className="text-slate-400 text-sm">Host and presenters will appear here when they share video or screen.</p>
+            </div>
+          )}
         </div>
 
-        {/* Live Closed Captions Overlay */}
+        {/* Live Closed Captions */}
         {captionsEnabled && currentCaption && (
           <div className="live-caption-pill">
             <span className="caption-speaker">{currentCaption.speaker}:</span>
@@ -405,46 +483,58 @@ export default function AuraWeaveConference({
         )}
       </div>
 
-      {/* Bottom Meeting Controls Bar */}
+      {/* Floating Bottom Controls */}
       <footer className="meeting-footer">
         <div className="meeting-controls-wrap">
-          {/* Mic Button */}
-          <button
-            type="button"
-            className={`control-btn ${isAudioMuted ? "danger" : "active"}`}
-            onClick={toggleAudio}
-            title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
-          >
-            {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
-            <span>{isAudioMuted ? "Unmute" : "Mute"}</span>
-          </button>
+          {/* Stage Controls */}
+          {isStageMember ? (
+            <>
+              <button
+                type="button"
+                className={`control-btn ${isAudioMuted ? "danger" : "active"}`}
+                onClick={toggleAudio}
+                title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
+              >
+                {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                <span>{isAudioMuted ? "Unmute" : "Mute"}</span>
+              </button>
 
-          {/* Camera Button */}
-          <button
-            type="button"
-            className={`control-btn ${isVideoMuted ? "danger" : "active"}`}
-            onClick={toggleVideo}
-            title={isVideoMuted ? "Start camera" : "Stop camera"}
-          >
-            {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
-            <span>{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
-          </button>
+              <button
+                type="button"
+                className={`control-btn ${isVideoMuted ? "danger" : "active"}`}
+                onClick={toggleVideo}
+                title={isVideoMuted ? "Start camera" : "Stop camera"}
+              >
+                {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
+                <span>{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
+              </button>
 
-          {/* Screen Share Button */}
-          <button
-            type="button"
-            className={`control-btn ${isScreenSharing ? "accent" : ""}`}
-            onClick={toggleScreenShare}
-            title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
-          >
-            <Monitor size={18} />
-            <span>{isScreenSharing ? "Stop Sharing" : "Share Screen"}</span>
-          </button>
+              <button
+                type="button"
+                className={`control-btn ${isScreenSharing ? "accent" : ""}`}
+                onClick={toggleScreenShare}
+                title="Share Screen to all 1,000 attendees"
+              >
+                <Monitor size={18} />
+                <span>{isScreenSharing ? "Stop Sharing" : "Share Screen"}</span>
+              </button>
+            </>
+          ) : (
+            /* Audience Raise Hand Control */
+            <button
+              type="button"
+              className={`control-btn ${myHandRaised ? "hand-raised-glow" : "accent"}`}
+              onClick={toggleRaiseHand}
+              title={myHandRaised ? "Lower your hand" : "Raise hand to request speaking on stage"}
+            >
+              <Hand size={18} className={myHandRaised ? "animate-bounce" : ""} />
+              <span>{myHandRaised ? "Lower Hand" : "Raise Hand"}</span>
+            </button>
+          )}
 
-          {/* Language Selector */}
+          {/* Universal Controls */}
           <LanguageSelector compact />
 
-          {/* Live Captions (CC) */}
           <button
             type="button"
             className={`control-btn ${captionsEnabled ? "accent" : ""}`}
@@ -455,7 +545,6 @@ export default function AuraWeaveConference({
             <span>CC</span>
           </button>
 
-          {/* Zero-Prompt Recorder */}
           <button
             type="button"
             className={`control-btn ${isRecording ? "danger recording-pulse" : ""}`}
@@ -466,7 +555,6 @@ export default function AuraWeaveConference({
             <span>{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
           </button>
 
-          {/* AI Notes */}
           <button
             type="button"
             className="control-btn ai-btn"
@@ -477,7 +565,6 @@ export default function AuraWeaveConference({
             <span>AI Notes</span>
           </button>
 
-          {/* Leave Button */}
           <button
             type="button"
             className="control-btn leave-btn"
@@ -497,6 +584,70 @@ export default function AuraWeaveConference({
         roomName={roomName}
       />
 
+      {/* Host Hands Raised Management Modal */}
+      {showHandsModal && (
+        <div className="ai-modal-backdrop" onClick={() => setShowHandsModal(false)}>
+          <div className="ai-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ai-modal-header">
+              <div className="flex items-center gap-2">
+                <Hand size={18} className="text-violet-400" />
+                <h3>Raised Hands ({handsRaised.length})</h3>
+              </div>
+              <button className="icon-close" onClick={() => setShowHandsModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="ai-modal-body">
+              {handsRaised.length === 0 ? (
+                <p className="text-slate-400 text-sm">No audience members currently have their hand raised.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {handsRaised.map((h) => (
+                    <div key={h.peerId} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                      <div className="flex items-center gap-3">
+                        {h.avatarUrl ? (
+                          <img src={h.avatarUrl} alt={h.name} className="w-9 h-9 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-violet-600 flex items-center justify-center font-bold text-white">
+                            {(h.name || "U")[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="font-semibold text-sm text-white">{h.name}</div>
+                          <div className="text-xs text-slate-400">Audience member requested to speak</div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="button primary small flex items-center gap-1.5"
+                        onClick={() => {
+                          promoteToStage(h.peerId);
+                          setShowHandsModal(false);
+                        }}
+                      >
+                        <ArrowUpRight size={14} /> Bring to Stage
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="ai-modal-footer">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setShowHandsModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* AI Summary Modal */}
       {showAiModal && (
         <div className="ai-modal-backdrop" onClick={() => setShowAiModal(false)}>
@@ -515,7 +666,7 @@ export default function AuraWeaveConference({
               {aiLoading ? (
                 <div className="ai-loading-state">
                   <LoaderCircle className="spin" size={28} />
-                  <p>Synthesizing meeting transcript into actionable notes with Llama 3.3…</p>
+                  <p>Synthesizing 1,000-participant meeting minutes with Llama 3.3…</p>
                 </div>
               ) : aiError ? (
                 <div className="notice error">{aiError}</div>
@@ -554,8 +705,16 @@ export default function AuraWeaveConference({
   );
 }
 
-// Remote Peer Video Tile Sub-component
-function RemotePeerTile({ peer }: { peer: AuraWeavePeer }) {
+// Remote Stage Presenter Tile
+function RemoteStagePeerTile({
+  peer,
+  isHost,
+  onDemote
+}: {
+  peer: AuraWeavePeer;
+  isHost: boolean;
+  onDemote: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -586,7 +745,7 @@ function RemotePeerTile({ peer }: { peer: AuraWeavePeer }) {
       )}
 
       <div className="tile-meta">
-        <span className="tile-name">{peer.name}</span>
+        <span className="tile-name">{peer.name} ({peer.role === "host" ? "Host" : "Presenter"})</span>
         {peer.isAudioMuted ? (
           <MicOff size={14} className="tile-muted-icon" />
         ) : (
@@ -594,7 +753,20 @@ function RemotePeerTile({ peer }: { peer: AuraWeavePeer }) {
         )}
       </div>
 
-      {peer.isScreenSharing && <div className="tile-screen-badge">Presenting</div>}
+      {peer.isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
+
+      {/* Host Demote Button */}
+      {isHost && peer.role === "presenter" && (
+        <button
+          type="button"
+          className="tile-demote-btn"
+          onClick={onDemote}
+          title="Return presenter to audience"
+        >
+          <ArrowDownLeft size={12} />
+          <span>Move to Audience</span>
+        </button>
+      )}
     </div>
   );
 }
