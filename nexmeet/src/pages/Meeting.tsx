@@ -1,12 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { LiveKitRoom, VideoConference, RoomAudioRenderer } from "@livekit/components-react";
-import { LoaderCircle, Share2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import Brand from "../components/Brand";
-import MeetingExtensions from "../components/MeetingExtensions";
-import ShareMeetingModal from "../components/ShareMeetingModal";
 import WaitingRoom from "../components/WaitingRoom";
-import HostAdmissionBanner from "../components/HostAdmissionBanner";
+import AuraWeaveConference from "../components/AuraWeaveConference";
 import { useAuth } from "../contexts/AuthContext";
 
 function getApiBase(): string {
@@ -20,27 +17,24 @@ function getApiBase(): string {
 export default function Meeting() {
   const { roomName = "" } = useParams();
   const location = useLocation();
-  const { session, user } = useAuth();
+  const { session } = useAuth();
   const isCreatedByMe = Boolean(
     (location.state as any)?.isHost ||
     (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`auraclave_host_${roomName}`) === "true")
   );
-  const [token, setToken] = useState("");
-  const [serverUrl, setServerUrl] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+
   const [admissionStatus, setAdmissionStatus] = useState<"checking" | "admitted" | "waiting" | "rejected">("checking");
   const [isHost, setIsHost] = useState(isCreatedByMe);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [quickCopied, setQuickCopied] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const pollTimerRef = useRef<any>(null);
 
-  // 1. Initial Request to Join
   useEffect(() => {
     let active = true;
 
     async function checkJoin() {
       if (!session?.access_token) {
+        // Allow guests/anonymous or require signin
         setError("Your session has expired. Please sign in again.");
         setLoading(false);
         return;
@@ -59,22 +53,21 @@ export default function Meeting() {
         });
 
         if (!res.ok) {
-          // Fallback to direct admission and preserve host status
+          // Direct admission fallback
           if (active) {
             setIsHost(isCreatedByMe);
             setAdmissionStatus("admitted");
-            fetchToken();
+            setLoading(false);
           }
           return;
         }
 
-        // Guard against non-JSON (HTML 404) responses
         const contentType = res.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) {
           if (active) {
             setIsHost(isCreatedByMe);
             setAdmissionStatus("admitted");
-            fetchToken();
+            setLoading(false);
           }
           return;
         }
@@ -83,60 +76,18 @@ export default function Meeting() {
         if (active) {
           setIsHost(Boolean(data.isHost));
           setAdmissionStatus(data.status);
+          setLoading(false);
 
-          if (data.status === "admitted") {
-            fetchToken();
-          } else if (data.status === "waiting") {
-            setLoading(false);
+          if (data.status === "waiting") {
             startPollingAdmission();
-          } else {
-            setLoading(false);
           }
         }
       } catch {
         if (active) {
+          setIsHost(isCreatedByMe);
           setAdmissionStatus("admitted");
-          fetchToken();
+          setLoading(false);
         }
-      }
-    }
-
-    async function fetchToken(retries = 2) {
-      try {
-        const base = getApiBase();
-        const apiUrl = base ? `${base}/api/token` : "/api/token";
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({
-            roomName,
-            participantName: user?.user_metadata?.full_name,
-            avatarUrl: user?.user_metadata?.avatar_url
-          })
-        });
-
-        // Guard against HTML error pages (e.g. Render 502 during redeploy)
-        const ct = response.headers.get("content-type") || "";
-        if (!ct.includes("application/json")) {
-          if (retries > 0) {
-            // Wait 3 seconds and retry
-            await new Promise(r => setTimeout(r, 3000));
-            return fetchToken(retries - 1);
-          }
-          throw new Error("Backend API is currently redeploying. Please try again in 1-2 minutes.");
-        }
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Could not join this meeting.");
-        if (active) {
-          setToken(data.token);
-          setServerUrl(data.serverUrl);
-          setAdmissionStatus("admitted");
-        }
-      } catch (err: any) {
-        if (active) setError(err instanceof Error ? err.message : "Unable to connect.");
-      } finally {
-        if (active) setLoading(false);
       }
     }
 
@@ -155,8 +106,6 @@ export default function Meeting() {
             if (data.status === "admitted") {
               clearInterval(pollTimerRef.current);
               setAdmissionStatus("admitted");
-              setLoading(true);
-              fetchToken();
             } else if (data.status === "rejected") {
               clearInterval(pollTimerRef.current);
               setAdmissionStatus("rejected");
@@ -174,7 +123,7 @@ export default function Meeting() {
     };
   }, [roomName, session?.access_token]);
 
-  // Handle Waiting Room view
+  // Handle Waiting Room / Rejected view
   if (admissionStatus === "waiting" || admissionStatus === "rejected") {
     return <WaitingRoom roomName={roomName} status={admissionStatus} />;
   }
@@ -182,7 +131,7 @@ export default function Meeting() {
   if (loading) {
     return (
       <div className="loading-screen">
-        <LoaderCircle className="spin" /> Preparing your meeting…
+        <LoaderCircle className="spin" /> Preparing your meeting with AuraWeave RTC™…
       </div>
     );
   }
@@ -202,59 +151,6 @@ export default function Meeting() {
     );
   }
 
-  return (
-    <div className="meeting-page">
-      <header className="meeting-header">
-        <Link to="/dashboard" className="meeting-brand">
-          <Brand small />
-          <span className="meeting-divider" />
-          <span className="meeting-room-label">Meeting room</span>
-        </Link>
-        <div className="meeting-header-actions">
-          <div className="meeting-room-id">
-            <span className="status-dot" /> {roomName}
-          </div>
-
-          {/* Host Controls Pill */}
-          {isHost && <HostAdmissionBanner roomName={roomName} />}
-
-          <button
-            className={`meeting-share-pill ${quickCopied ? "copied" : ""}`}
-            onClick={() => setShowShareModal(true)}
-            title="Share meeting link"
-            type="button"
-          >
-            <Share2 size={14} />
-            <span>{quickCopied ? "Link Copied!" : "Share Link"}</span>
-          </button>
-        </div>
-      </header>
-
-      <div className="meeting-content">
-        <LiveKitRoom
-          video
-          audio
-          token={token}
-          serverUrl={serverUrl}
-          connect
-          onDisconnected={() => {}}
-          data-lk-theme="default"
-          className="livekit-room"
-        >
-          <VideoConference />
-          <RoomAudioRenderer />
-          <MeetingExtensions
-            roomName={roomName}
-            onOpenShare={() => setShowShareModal(true)}
-          />
-        </LiveKitRoom>
-      </div>
-
-      <ShareMeetingModal
-        isOpen={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        roomName={roomName}
-      />
-    </div>
-  );
+  // AuraWeave RTC™ 100% Free Peer-to-Peer Video Room
+  return <AuraWeaveConference roomName={roomName} isHost={isHost} />;
 }

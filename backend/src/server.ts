@@ -1,9 +1,11 @@
 import express, { type Request, type Response } from "express";
+import http from "http";
 import cors from "cors";
 import dotenv from "dotenv";
 import { AccessToken } from "livekit-server-sdk";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
+import { AuraWeaveSignaler } from "./auraweave.js";
 import {
   requestToJoin,
   checkAdmission,
@@ -331,6 +333,9 @@ app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) =>
   }
 });
 
-app.listen(port, () => {
-  console.log(`AuraClave backend running on port ${port}`);
+const server = http.createServer(app);
+new AuraWeaveSignaler(server);
+
+server.listen(port, () => {
+  console.log(`AuraClave backend with AuraWeave RTC running on port ${port}`);
 });
