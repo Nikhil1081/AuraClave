@@ -36,6 +36,10 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
     throw new Error("Missing authentication token.");
   }
 
+  return getAuthenticatedUserFromToken(token);
+}
+
+export async function getAuthenticatedUserFromToken(token: string): Promise<AuthenticatedUser> {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as {
       id: string;
