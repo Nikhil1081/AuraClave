@@ -1,9 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
-
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
-export const isSupabaseConfigured = Boolean(url && key);
-export const supabase = isSupabaseConfigured
-  ? createClient(url!, key!)
-  : null;
+// Legacy Supabase client stub - AuraClave now uses native database connectivity via /api/auth
+export const isSupabaseConfigured = true;
+export const supabase = null;

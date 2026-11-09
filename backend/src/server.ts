@@ -2,7 +2,8 @@ import express, { type Request, type Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { AccessToken } from "livekit-server-sdk";
-import { getAuthenticatedUser } from "./auth.js";
+import { getAuthenticatedUser, generateToken } from "./auth.js";
+import { createUser, findUserByEmail, verifyPassword } from "./db.js";
 
 dotenv.config();
 
@@ -19,6 +20,78 @@ app.get("/", (_req: Request, res: Response) => {
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy" });
+});
+
+// Authentication: Sign Up
+app.post("/api/auth/signup", async (req: Request, res: Response) => {
+  try {
+    const { email, password, name } = req.body ?? {};
+
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ error: "Please provide a valid email address." });
+    }
+    if (!password || typeof password !== "string" || password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters long." });
+    }
+
+    const user = await createUser(email, password, name || "");
+    const token = generateToken(user);
+
+    return res.status(201).json({
+      user: {
+        id: user.id,
+        email: user.email,
+        user_metadata: { full_name: user.fullName }
+      },
+      token
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || "Sign up failed." });
+  }
+});
+
+// Authentication: Login
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body ?? {};
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Please enter your email and password." });
+    }
+
+    const user = await findUserByEmail(email);
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or password." });
+    }
+
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) {
+      return res.status(400).json({ error: "Invalid email or password." });
+    }
+
+    const token = generateToken(user);
+
+    return res.status(200).json({
+      user: {
+        id: user.id,
+        email: user.email,
+        user_metadata: { full_name: user.fullName }
+      },
+      token
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || "Login failed." });
+  }
+});
+
+// Authentication: Get current session user
+app.get("/api/auth/me", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    return res.status(200).json({ user });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Not authenticated." });
+  }
 });
 
 // LiveKit token endpoint
