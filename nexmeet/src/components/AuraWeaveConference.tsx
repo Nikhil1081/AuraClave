@@ -20,7 +20,6 @@ import {
   Users,
   Radio,
   ArrowUpRight,
-  ArrowDownLeft,
   UserCheck,
   MessageSquare,
   Send
@@ -65,7 +64,6 @@ export default function AuraWeaveConference({
     audienceCount,
     totalParticipants,
     handsRaised,
-    myHandRaised,
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
@@ -76,9 +74,7 @@ export default function AuraWeaveConference({
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
-    toggleRaiseHand,
     promoteToStage,
-    demoteToAudience,
     broadcastCaption,
     setOnCaptionReceived
   } = useAuraWeave({
@@ -446,23 +442,6 @@ export default function AuraWeaveConference({
       {/* Main Content Area */}
       <div className={`meeting-content ${showChat ? "with-chat" : ""}`}>
         <div className="meeting-stage-area">
-          {/* Audience Status Notification Banner */}
-          {!isStageMember && (
-            <div className="audience-status-banner">
-              <div className="flex items-center gap-2">
-                <span className="live-dot" />
-                <span>
-                  You are currently in the <strong>Audience</strong> (watching in HD). Click <strong>Raise Hand</strong> below to speak on stage.
-                </span>
-              </div>
-              {myHandRaised && (
-                <span className="hand-raised-badge">
-                  <Hand size={13} /> Hand Raised — Waiting for Host
-                </span>
-              )}
-            </div>
-          )}
-
           {/* Stage Video Grid */}
           <div className={`auraweave-grid ${gridClass}`}>
             {/* Local Tile (if on Stage) */}
@@ -474,7 +453,7 @@ export default function AuraWeaveConference({
                       if (el.srcObject !== localStream) {
                         el.srcObject = localStream;
                       }
-                      if (localStream && !isVideoMuted) {
+                      if (localStream && (!isVideoMuted || isScreenSharing)) {
                         el.play().catch(() => {});
                       }
                     }
@@ -482,11 +461,11 @@ export default function AuraWeaveConference({
                   autoPlay
                   playsInline
                   muted
-                  style={{ display: isVideoMuted ? "none" : "block" }}
+                  style={{ display: isVideoMuted && !isScreenSharing ? "none" : "block" }}
                   className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
                 />
 
-                {isVideoMuted && (
+                {isVideoMuted && !isScreenSharing && (
                   <div className="tile-placeholder">
                     {myAvatar ? (
                       <img src={myAvatar} alt={myName} className="tile-avatar-img" />
@@ -521,13 +500,11 @@ export default function AuraWeaveConference({
                 <RemoteStagePeerTile
                   key={peer.peerId}
                   peer={peer}
-                  isHost={role === "host"}
-                  onDemote={() => demoteToAudience(peer.peerId)}
                 />
               ))}
 
-            {/* Empty Stage Placeholder if Audience with no Active Presenter */}
-            {!isStageMember && peers.length === 0 && (
+            {/* Empty Stage Placeholder when nobody else has joined */}
+            {peers.length === 0 && (
               <div className="empty-stage-box">
                 <Radio size={36} className="text-violet-400 mb-2" />
                 <h3>The Stage is Ready</h3>
@@ -623,8 +600,7 @@ export default function AuraWeaveConference({
         <div className="meeting-controls-wrap">
           {/* Group 1: Media / Stage Controls */}
           <div className="controls-group">
-            {isStageMember ? (
-              <>
+            <>
                 <button
                   type="button"
                   className={`control-btn ${isAudioMuted ? "danger" : ""}`}
@@ -654,18 +630,7 @@ export default function AuraWeaveConference({
                   <Monitor size={18} />
                   <span>{isScreenSharing ? "Stop Sharing" : "Share"}</span>
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className={`control-btn ${myHandRaised ? "hand-raised-glow" : "accent"}`}
-                onClick={toggleRaiseHand}
-                title={myHandRaised ? "Lower your hand" : "Raise hand to speak on stage"}
-              >
-                <Hand size={18} className={myHandRaised ? "animate-bounce" : ""} />
-                <span>{myHandRaised ? "Hand Raised" : "Raise Hand"}</span>
-              </button>
-            )}
+            </>
           </div>
 
           <div className="controls-divider" />
@@ -870,27 +835,26 @@ export default function AuraWeaveConference({
 
 // Remote Stage Presenter Tile
 function RemoteStagePeerTile({
-  peer,
-  isHost,
-  onDemote
+  peer
 }: {
   peer: AuraWeavePeer;
-  isHost: boolean;
-  onDemote: () => void;
 }) {
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
-  const showVideo = Boolean(peer.stream && !peer.isVideoMuted);
+  const showVideo = Boolean(peer.stream && (!peer.isVideoMuted || peer.isScreenSharing));
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Dedicated background audio pipeline: guarantees remote voice is always heard even when video is off
   useEffect(() => {
     if (audioRef.current && peer.stream) {
-      if (audioRef.current.srcObject !== peer.stream) {
-        audioRef.current.srcObject = peer.stream;
+      const audioStream = new MediaStream(peer.stream.getAudioTracks());
+      if (audioRef.current.srcObject !== audioStream) {
+        audioRef.current.srcObject = audioStream;
       }
-      audioRef.current.play().catch((err) => {
-        console.warn("Audio autoplay blocked by browser policy, user interaction required:", err);
+      audioRef.current.volume = 1;
+      audioRef.current.muted = false;
+      audioRef.current.play().catch(() => {
+        // A later click is handled by the global autoplay unlocker.
       });
     }
   }, [peer.stream]);
@@ -910,7 +874,7 @@ function RemoteStagePeerTile({
   return (
     <div className="auraweave-tile remote-tile">
       {/* Background audio pipeline: guarantees 100% audio transmission regardless of video visibility */}
-      <audio ref={audioRef} autoPlay playsInline />
+      <audio ref={audioRef} autoPlay playsInline controls={false} />
 
       <video
         ref={videoRef}
@@ -942,18 +906,6 @@ function RemoteStagePeerTile({
 
       {peer.isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
 
-      {/* Host Demote Button */}
-      {isHost && peer.role === "presenter" && (
-        <button
-          type="button"
-          className="tile-demote-btn"
-          onClick={onDemote}
-          title="Return presenter to audience"
-        >
-          <ArrowDownLeft size={12} />
-          <span>Move to Audience</span>
-        </button>
-      )}
     </div>
   );
 }

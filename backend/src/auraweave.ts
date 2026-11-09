@@ -64,7 +64,7 @@ export class AuraWeaveSignaler {
 
               const isFirst = room.size === 0;
 
-              // Everyone has full speaking, video, and screen share permissions by default
+              // Everyone has full speaking, video, and screen share permissions.
               const assignedRole: AuraRole = isHost || isFirst ? "host" : "presenter";
 
               const participant: AuraWeaveParticipant = {
@@ -230,7 +230,7 @@ export class AuraWeaveSignaler {
 
               const room = this.rooms.get(currentRoomName);
               const me = room?.get(currentPeerId);
-              if (me && me.role !== "audience") {
+              if (me) {
                 if (typeof isAudioMuted === "boolean") me.isAudioMuted = isAudioMuted;
                 if (typeof isVideoMuted === "boolean") me.isVideoMuted = isVideoMuted;
                 if (typeof isScreenSharing === "boolean") me.isScreenSharing = isScreenSharing;

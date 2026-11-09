@@ -101,7 +101,9 @@ export function useAuraWeave({
   const queuedCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
-  const isStageMember = role === "host" || role === "presenter";
+  // Every participant can publish audio, video, and screen share. The role is
+  // retained for display and host-only moderation controls.
+  const isStageMember = true;
 
   // 1. Initialize Local Media (Camera & Microphone) for All Participants
   useEffect(() => {
@@ -428,7 +430,9 @@ export function useAuraWeave({
         const p = next.get(targetPeerId);
         if (p) {
           const existingTracks = p.stream ? p.stream.getTracks() : [];
-          const incomingTracks = event.streams[0] ? event.streams[0].getTracks() : [event.track];
+          const incomingTracks = event.streams[0]
+            ? event.streams[0].getTracks()
+            : [event.track];
           const allTracksMap = new Map<string, MediaStreamTrack>();
           existingTracks.forEach((t) => allTracksMap.set(t.id, t));
           incomingTracks.forEach((t) => allTracksMap.set(t.id, t));
@@ -693,7 +697,10 @@ export function useAuraWeave({
         const combinedScreenStream = new MediaStream([screenTrack, ...audioTracks]);
         localStreamRef.current = combinedScreenStream;
         setLocalStream(combinedScreenStream);
-        setIsVideoMuted(false);
+        const cameraIsAvailable = Boolean(
+          cameraTrackRef.current && cameraTrackRef.current.readyState === "live"
+        );
+        setIsVideoMuted(!cameraIsAvailable);
         setIsScreenSharing(true);
 
         // Push screen video track to all peer connections (add or replace)
@@ -710,7 +717,7 @@ export function useAuraWeave({
           wsRef.current.send(
             JSON.stringify({
               type: "media-state",
-              data: { isScreenSharing: true, isVideoMuted: false }
+              data: { isScreenSharing: true, isVideoMuted: !cameraIsAvailable }
             })
           );
         }
@@ -815,7 +822,6 @@ export function useAuraWeave({
     localStream,
     peers: Array.from(peers.values()).filter(
       (p) =>
-        (p.role === "host" || p.role === "presenter") &&
         p.peerId !== myPeerIdRef.current &&
         (!user?.id || p.userId !== user.id) &&
         (!user?.name || p.name !== user.name)
