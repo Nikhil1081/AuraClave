@@ -10,7 +10,9 @@ import {
   Copy,
   Check,
   Download,
-  LoaderCircle
+  LoaderCircle,
+  Mic,
+  Monitor
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage, SUPPORTED_LANGUAGES } from "../contexts/LanguageContext";
@@ -37,9 +39,13 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [showRecordMenu, setShowRecordMenu] = useState(false);
+  const [recordingMode, setRecordingMode] = useState<"audio" | "video">("audio");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const timerIntervalRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const userMicStreamRef = useRef<MediaStream | null>(null);
 
   // AI Summary Modal state
   const [showAiModal, setShowAiModal] = useState(false);
@@ -190,9 +196,106 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
     };
   }, [captionsEnabled, room, user, currentSpeechCode]);
 
-  // 3. Meeting Recording (MediaRecorder API)
-  const startRecording = async () => {
+  // 3. Meeting Recording (Audio Only or Screen Video)
+  // Mode A: Audio Recording (No screen sharing required!)
+  const startAudioRecording = async () => {
     try {
+      setShowRecordMenu(false);
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtxClass();
+      audioContextRef.current = audioCtx;
+      const destination = audioCtx.createMediaStreamDestination();
+
+      // 1. Capture local microphone
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        userMicStreamRef.current = micStream;
+        const micSource = audioCtx.createMediaStreamSource(micStream);
+        micSource.connect(destination);
+      } catch (micErr) {
+        console.warn("Could not access local mic, proceeding with room audio:", micErr);
+      }
+
+      // 2. Connect remote participants' audio from LiveKit
+      if (room) {
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((pub) => {
+            if (pub.track && pub.kind === "audio" && (pub.track as any).mediaStreamTrack) {
+              try {
+                const remoteStream = new MediaStream([(pub.track as any).mediaStreamTrack]);
+                const remoteSource = audioCtx.createMediaStreamSource(remoteStream);
+                remoteSource.connect(destination);
+              } catch (trackErr) {
+                console.warn("Could not attach participant audio track:", trackErr);
+              }
+            }
+          });
+        });
+      }
+
+      let mimeType = "audio/webm;codecs=opus";
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      }
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(destination.stream, { mimeType })
+        : new MediaRecorder(destination.stream);
+
+      recordedChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        clearInterval(timerIntervalRef.current);
+        setRecordingSeconds(0);
+        setIsRecording(false);
+
+        if (userMicStreamRef.current) {
+          userMicStreamRef.current.getTracks().forEach((track) => track.stop());
+          userMicStreamRef.current = null;
+        }
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+          audioContextRef.current.close().catch(() => {});
+          audioContextRef.current = null;
+        }
+
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType || "audio/webm" });
+        if (blob.size === 0) return;
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.download = `AuraClave-Audio-${roomName}-${timestamp}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      mediaRecorder.start(1000);
+      mediaRecorderRef.current = mediaRecorder;
+      setRecordingMode("audio");
+      setIsRecording(true);
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingSeconds((sec) => sec + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error("Audio recording error:", err);
+      alert("Could not start audio recording: " + (err?.message || "Error"));
+    }
+  };
+
+  // Mode B: Screen & Video Recording
+  const startScreenRecording = async () => {
+    try {
+      setShowRecordMenu(false);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true
@@ -227,22 +330,24 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
         const a = document.createElement("a");
         a.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        a.download = `AuraClave-${roomName}-${timestamp}.webm`;
+        a.download = `AuraClave-Video-${roomName}-${timestamp}.webm`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       };
 
-      // Listen for user clicking "Stop Sharing" on the browser popup
-      stream.getVideoTracks()[0].onended = () => {
-        if (mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
-      };
+      if (stream.getVideoTracks().length > 0) {
+        stream.getVideoTracks()[0].onended = () => {
+          if (mediaRecorder.state !== "inactive") {
+            mediaRecorder.stop();
+          }
+        };
+      }
 
       mediaRecorder.start(1000);
       mediaRecorderRef.current = mediaRecorder;
+      setRecordingMode("video");
       setIsRecording(true);
 
       timerIntervalRef.current = setInterval(() => {
@@ -342,26 +447,63 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
       <div className="meeting-custom-bar">
         <LanguageSelector compact />
 
-        {/* Recording Button */}
-        {isRecording ? (
-          <button
-            className="action-pill recording-active"
-            onClick={stopRecording}
-            title="Stop and save recording"
-          >
-            <Square size={13} fill="#ff4d6d" color="#ff4d6d" />
-            <span className="rec-text">REC {formatTimer(recordingSeconds)}</span>
-          </button>
-        ) : (
-          <button
-            className="action-pill"
-            onClick={startRecording}
-            title="Record meeting (Audio & Video)"
-          >
-            <CircleDot size={15} color="#fa5252" />
-            <span>{t("meeting_record")}</span>
-          </button>
-        )}
+        {/* Recording Menu & Button */}
+        <div className="record-container">
+          {isRecording ? (
+            <button
+              className="action-pill recording-active"
+              onClick={stopRecording}
+              title="Stop and save recording"
+            >
+              <Square size={13} fill="#ff4d6d" color="#ff4d6d" />
+              <span className="rec-text">
+                REC {recordingMode === "audio" ? "AUDIO" : "VIDEO"} {formatTimer(recordingSeconds)}
+              </span>
+            </button>
+          ) : (
+            <button
+              className="action-pill"
+              onClick={() => setShowRecordMenu(!showRecordMenu)}
+              title="Record meeting"
+            >
+              <CircleDot size={15} color="#fa5252" />
+              <span>{t("meeting_record")}</span>
+            </button>
+          )}
+
+          {showRecordMenu && !isRecording && (
+            <div className="record-menu-popover">
+              <div className="record-menu-header">Select Recording Mode</div>
+              <button
+                className="record-menu-item"
+                onClick={startAudioRecording}
+                type="button"
+              >
+                <div className="record-menu-icon audio">
+                  <Mic size={17} />
+                </div>
+                <div className="record-menu-info">
+                  <span className="record-menu-title">Record Meeting Audio</span>
+                  <span className="record-menu-sub">No screen sharing needed. Captures all participant voices.</span>
+                </div>
+              </button>
+
+              <button
+                className="record-menu-item"
+                onClick={startScreenRecording}
+                type="button"
+              >
+                <div className="record-menu-icon video">
+                  <Monitor size={17} />
+                </div>
+                <div className="record-menu-info">
+                  <span className="record-menu-title">Record Screen & Video</span>
+                  <span className="record-menu-sub">Captures your screen, presentations, and meeting video.</span>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* Live Captions Toggle */}
         <button
