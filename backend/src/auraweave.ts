@@ -84,13 +84,12 @@ export class AuraWeaveSignaler {
 
               room.set(currentPeerId, participant);
 
-              // Extract stage members (strictly excluding the joining user)
+              // Every connected participant is a regular two-way meeting peer.
               const stageMembers: any[] = [];
               const handsRaised: any[] = [];
-              let audienceCount = 0;
 
               room.forEach((p) => {
-                if (p.peerId !== currentPeerId && p.userId !== userId && (p.role === "host" || p.role === "presenter")) {
+                if (p.peerId !== currentPeerId && p.userId !== userId) {
                   stageMembers.push({
                     peerId: p.peerId,
                     userId: p.userId,
@@ -101,8 +100,6 @@ export class AuraWeaveSignaler {
                     isVideoMuted: p.isVideoMuted,
                     isScreenSharing: p.isScreenSharing
                   });
-                } else if (p.peerId !== currentPeerId && p.userId !== userId && p.role === "audience") {
-                  audienceCount++;
                 }
 
                 if (p.peerId !== currentPeerId && p.userId !== userId && p.raisedHand) {
@@ -122,7 +119,7 @@ export class AuraWeaveSignaler {
                   peerId: currentPeerId,
                   role: assignedRole,
                   stageMembers,
-                  totalAudience: audienceCount,
+                  totalAudience: 0,
                   totalRoomMembers: room.size,
                   handsRaised
                 }
@@ -131,7 +128,7 @@ export class AuraWeaveSignaler {
               // 2. Broadcast updated room status and presence to all participants
               this.broadcastRoomSummary(roomName);
 
-              // 3. Notify stage peers that a participant joined with full speaking & video permissions
+              // 3. Notify all existing peers so they create a two-way connection.
               this.broadcast(roomName, currentPeerId, {
                 type: "stage-member-added",
                 data: {
@@ -338,23 +335,18 @@ export class AuraWeaveSignaler {
 
     const stageMembers: any[] = [];
     const handsRaised: any[] = [];
-    let audienceCount = 0;
 
     room.forEach((p) => {
-      if (p.role === "host" || p.role === "presenter") {
-        stageMembers.push({
-          peerId: p.peerId,
-          userId: p.userId,
-          name: p.name,
-          avatarUrl: p.avatarUrl,
-          role: p.role,
-          isAudioMuted: p.isAudioMuted,
-          isVideoMuted: p.isVideoMuted,
-          isScreenSharing: p.isScreenSharing
-        });
-      } else {
-        audienceCount++;
-      }
+      stageMembers.push({
+        peerId: p.peerId,
+        userId: p.userId,
+        name: p.name,
+        avatarUrl: p.avatarUrl,
+        role: p.role,
+        isAudioMuted: p.isAudioMuted,
+        isVideoMuted: p.isVideoMuted,
+        isScreenSharing: p.isScreenSharing
+      });
 
       if (p.raisedHand) {
         handsRaised.push({
@@ -370,7 +362,7 @@ export class AuraWeaveSignaler {
       type: "room-summary",
       data: {
         stageMembers,
-        audienceCount,
+        audienceCount: 0,
         totalParticipants: room.size,
         handsRaised
       }

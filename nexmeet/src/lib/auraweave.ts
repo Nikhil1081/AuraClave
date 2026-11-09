@@ -99,6 +99,7 @@ export function useAuraWeave({
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const queuedCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const makingOfferRef = useRef<Set<string>>(new Set());
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
   // Every participant can publish audio, video, and screen share. The role is
@@ -218,11 +219,10 @@ export function useAuraWeave({
             setTotalParticipants(data.totalRoomMembers || 1);
             setHandsRaised(data.handsRaised || []);
 
-            // Connect to active stage members
+            // Connect to every participant already in the room.
             const stageMembers: any[] = data.stageMembers || [];
             stageMembers.forEach((p) => {
               addPeerState(p);
-              // Stage members or audience establish WebRTC connection to download stage video
               createPeerConnection(p.peerId, true);
             });
             break;
@@ -247,7 +247,7 @@ export function useAuraWeave({
             setTotalParticipants(data.totalParticipants || 1);
             setHandsRaised(data.handsRaised || []);
 
-            // Synchronize stage members: prune any peer not currently on stage or representing self
+            // Synchronize all participants currently in the room.
             const serverStageList: any[] = data.stageMembers || [];
             const activeRemotePeerIds = new Set(
               serverStageList
@@ -425,10 +425,20 @@ export function useAuraWeave({
     };
 
     pc.ontrack = (event) => {
+      event.track.enabled = true;
       setPeers((prev) => {
         const next = new Map(prev);
-        const p = next.get(targetPeerId);
-        if (p) {
+        const p = next.get(targetPeerId) || {
+          peerId: targetPeerId,
+          userId: targetPeerId,
+          name: "Participant",
+          avatarUrl: "",
+          role: "presenter" as AuraRole,
+          isAudioMuted: false,
+          isVideoMuted: false,
+          isScreenSharing: false
+        };
+        {
           const existingTracks = p.stream ? p.stream.getTracks() : [];
           const allTracksMap = new Map<string, MediaStreamTrack>();
           existingTracks.forEach((t) => allTracksMap.set(t.id, t));
@@ -444,6 +454,8 @@ export function useAuraWeave({
 
     pc.onnegotiationneeded = async () => {
       if (!isInitiator) return;
+      if (pc.signalingState !== "stable" || makingOfferRef.current.has(targetPeerId)) return;
+      makingOfferRef.current.add(targetPeerId);
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -460,6 +472,8 @@ export function useAuraWeave({
         }
       } catch (err) {
         console.error("Negotiation error:", err);
+      } finally {
+        makingOfferRef.current.delete(targetPeerId);
       }
     };
 
@@ -477,6 +491,9 @@ export function useAuraWeave({
 
     try {
       if (signal.sdp) {
+        if (signal.sdp.type === "offer" && pc.signalingState !== "stable") {
+          return;
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
 
         const queued = queuedCandidatesRef.current.get(senderPeerId) || [];
