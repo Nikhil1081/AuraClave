@@ -11,6 +11,260 @@
 @media(max-width:900px){.hero{grid-template-columns:1fr;gap:15px;padding-top:65px}.hero-copy{text-align:center}.hero-description{margin:auto}.hero-actions,.hero-trust{justify-content:center}.hero-art{min-height:420px}.feature-grid{grid-template-columns:repeat(2,1fr)}.auth-layout{grid-template-columns:1fr}.auth-visual{display:none}.auth-panel{min-height:100vh;padding:28px 7%}.sidebar{width:205px}.dashboard-main{margin-left:205px;padding:0 4%}.meeting-actions{grid-template-columns:1fr}}
 @media(max-width:600px){.container{width:calc(100% - 34px)}.nav{height:70px}.nav-links{display:none}.nav-actions{gap:12px}.nav-login{display:none}.hero{padding-top:58px;min-height:auto}.hero h1{font-size:53px}.hero-description{font-size:14px}.hero-actions{flex-direction:column}.hero-actions .button{width:100%}.hero-art{min-height:340px;margin:0 -8px}.call-window{transform:none;padding:9px}.person{height:105px}.person-avatar{width:43px;height:43px}.floating-note{right:-2px;top:22px}.floating-secure{left:-2px;bottom:25px}.feature-strip{padding:60px 0}.section-heading h2{font-size:35px}.feature-grid{grid-template-columns:1fr 1fr;gap:9px;margin-top:30px}.feature-card{padding:17px 14px}.feature-card h3{font-size:14px}.feature-card p{font-size:11px}.bottom-cta{padding:28px 22px;display:block}.bottom-cta h2{font-size:31px;margin-bottom:20px}.footer{height:auto;min-height:90px;gap:10px;flex-wrap:wrap;padding:20px 0}.footer>span:nth-child(2){order:3;width:100%}.dashboard-shell{padding-bottom:25px}.sidebar{position:relative;width:auto;height:auto;inset:auto;padding:15px 17px;display:flex;flex-direction:row;align-items:center;justify-content:space-between;border-right:0;border-bottom:1px solid var(--line)}.sidebar-label,.sidebar>.side-item,.sidebar-bottom .profile-mini{display:none}.sidebar-bottom{margin:0}.logout{padding:8px}.dashboard-main{margin:0;padding:0 18px}.dash-top{height:55px}.welcome-row{padding:34px 0 24px;align-items:start;gap:10px}.welcome-row h1{font-size:25px}.date-chip{font-size:9px;padding:8px}.action-card{padding:21px;min-height:245px}.join-input{flex-wrap:wrap}.join-input input{height:42px;flex-basis:100%}.dash-lower{margin-top:32px}.subtle-tag{display:none}.invite-box{flex-wrap:wrap}.invite-text{min-width:calc(100% - 60px)}.invite-box .button{width:100%}.meeting-header{padding:0 13px}.meeting-room-label{display:none}.meeting-content{padding:5px}.setup-card{padding:25px}.auth-panel{padding:24px}.auth-form-wrap h2{font-size:30px}}
 
+/* Meeting refresh: a calmer, Meet-inspired stage and control surface. */
+.meeting-page {
+  background: #202124;
+  color: #e8eaed;
+}
+
+.meeting-header {
+  height: 72px;
+  padding: 0 28px;
+  background: #202124;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.meeting-brand .brand {
+  color: #f1f3f4;
+}
+
+.meeting-room-label {
+  color: #bdc1c6;
+  font-size: 13px;
+}
+
+.meeting-room-id {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  color: #bdc1c6;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.auraweave-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: rgba(138, 180, 248, 0.12);
+  color: #aecbfa;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.audience-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #bdc1c6;
+  font-size: 13px;
+}
+
+.meeting-content {
+  padding: 12px 18px 100px !important;
+}
+
+.meeting-stage-area {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.auraweave-grid {
+  gap: 10px;
+  padding: 0;
+}
+
+.auraweave-tile {
+  min-height: 220px;
+  border: 0;
+  border-radius: 12px;
+  background: #3c4043;
+  box-shadow: none;
+}
+
+.auraweave-tile::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 72px;
+  pointer-events: none;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.48));
+}
+
+.tile-placeholder {
+  background: radial-gradient(circle at 50% 40%, #5f6368 0%, #3c4043 62%, #292a2d 100%);
+}
+
+.tile-avatar-img,
+.tile-avatar-fallback {
+  width: 84px;
+  height: 84px;
+}
+
+.tile-avatar-fallback {
+  border: 0;
+  font-size: 34px;
+  background: linear-gradient(135deg, #8ab4f8, #7baaf7);
+  color: #202124;
+}
+
+.tile-meta {
+  bottom: 11px;
+  left: 13px;
+  z-index: 12;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+}
+
+.tile-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-screen-badge {
+  top: 12px;
+  right: 12px;
+  z-index: 12;
+  border-radius: 7px;
+  background: rgba(32, 33, 36, 0.78);
+  color: #e8eaed;
+  padding: 7px 10px;
+}
+
+.empty-stage-box {
+  min-height: 260px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: #292a2d;
+}
+
+.meeting-footer {
+  bottom: 20px;
+}
+
+.meeting-controls-wrap {
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 30px;
+  background: rgba(32, 33, 36, 0.96);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+}
+
+.controls-group {
+  gap: 6px;
+}
+
+.controls-divider {
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.control-btn,
+.meeting-footer .lang-btn {
+  width: 44px;
+  height: 44px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: #3c4043 !important;
+  color: #e8eaed !important;
+  font-size: 0 !important;
+}
+
+.control-btn:hover,
+.meeting-footer .lang-btn:hover {
+  transform: none;
+  background: #5f6368 !important;
+}
+
+.control-btn.accent,
+.control-btn.active {
+  background: #8ab4f8 !important;
+  color: #202124 !important;
+}
+
+.control-btn.danger {
+  background: #ea4335 !important;
+  border: 0 !important;
+  color: #fff !important;
+}
+
+.control-btn.leave-btn {
+  width: 58px;
+  border-radius: 22px !important;
+  background: #ea4335 !important;
+}
+
+.control-btn.ai-btn {
+  background: #3c4043 !important;
+}
+
+.control-btn span:not(.chat-unread-badge) {
+  display: none;
+}
+
+.chat-unread-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: grid !important;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: #8ab4f8;
+  color: #202124;
+  font-size: 10px !important;
+}
+
+.live-caption-pill {
+  bottom: 88px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(32, 33, 36, 0.94);
+}
+
+.meeting-chat-drawer {
+  background: #292a2d;
+  border-color: rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+}
+
+@media (max-width: 850px) {
+  .meeting-header {
+    padding: 0 14px;
+  }
+
+  .meeting-header-actions {
+    gap: 8px;
+  }
+
+  .auraweave-badge,
+  .meeting-room-id {
+    display: none;
+  }
+
+  .audience-pill span {
+    display: none;
+  }
+
+  .meeting-content {
+    padding: 8px 8px 96px !important;
+  }
+
+  .meeting-controls-wrap {
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+  }
+}
+
 
 /* Custom Meeting Overlay Styles */
 .meeting-content {
