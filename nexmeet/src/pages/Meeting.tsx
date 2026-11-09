@@ -68,6 +68,17 @@ export default function Meeting() {
           return;
         }
 
+        // Guard against non-JSON (HTML 404) responses
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          if (active) {
+            setIsHost(isCreatedByMe);
+            setAdmissionStatus("admitted");
+            fetchToken();
+          }
+          return;
+        }
+
         const data = await res.json();
         if (active) {
           setIsHost(Boolean(data.isHost));
@@ -103,6 +114,13 @@ export default function Meeting() {
             avatarUrl: user?.user_metadata?.avatar_url
           })
         });
+
+        // Guard against HTML error pages
+        const ct = response.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) {
+          throw new Error("Backend API is currently redeploying. Please try again in 1-2 minutes.");
+        }
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not join this meeting.");
         if (active) {
