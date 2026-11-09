@@ -22,6 +22,29 @@ export function getApiBase(): string {
   return "";
 }
 
+async function safeParseJson(res: Response): Promise<any> {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      return await res.json();
+    } catch {
+      // Fall through
+    }
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Backend API is currently redeploying. Please try again in 1-2 minutes.");
+    }
+    throw new Error(`Server returned HTTP ${res.status}: ${text.slice(0, 100)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Unexpected response from backend server.");
+  }
+}
+
 export const auth = {
   getToken(): string | null {
     try {
@@ -57,9 +80,9 @@ export const auth = {
       body: JSON.stringify({ email, password, name })
     });
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (!res.ok) {
-      throw new Error(data.error || "Failed to sign up.");
+      throw new Error(data?.error || "Failed to sign up.");
     }
 
     localStorage.setItem(TOKEN_KEY, data.token);
@@ -79,9 +102,9 @@ export const auth = {
       body: JSON.stringify({ email, password })
     });
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (!res.ok) {
-      throw new Error(data.error || "Invalid email or password.");
+      throw new Error(data?.error || "Invalid email or password.");
     }
 
     localStorage.setItem(TOKEN_KEY, data.token);
@@ -106,11 +129,10 @@ export const auth = {
         this.signOut();
         return null;
       }
-      const data = await res.json();
+      const data = await safeParseJson(res);
       localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       return data.user;
     } catch {
-      // If server is unreachable but we have cached user, maintain offline session
       return this.getUser();
     }
   },

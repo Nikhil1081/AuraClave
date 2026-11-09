@@ -11,7 +11,7 @@
   [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
   [![LiveKit](https://img.shields.io/badge/LiveKit_SFU-WebRTC-blue?style=for-the-badge)](https://livekit.io/)
   [![Groq](https://img.shields.io/badge/Groq-Llama_3.3_70B-orange?style=for-the-badge)](https://groq.com/)
-  [![Supabase](https://img.shields.io/badge/Supabase-Auth_&_DB-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
+  [![Auth & DB](https://img.shields.io/badge/Auth_&_DB-Native_JWT_%26_Persistent_DB-3ECF8E?style=for-the-badge&logo=auth0&logoColor=white)](#)
   [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
@@ -29,6 +29,7 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
 2. **🤖 Sub-Second AI Meeting Intelligence**: Powered by **Groq Cloud (LLaMA 3.3 70B)** to automatically generate structured Executive Summaries, Key Decisions, and Action Items in your chosen language.
 3. **🔒 100% Private Client-Side Recording**: Direct browser-to-disk recording using the native `MediaRecorder` API. Zero server storage costs, zero cloud data leaks.
 4. **⚡ Ultra-Lightweight & Fast**: Built with React 19, Vite, and LiveKit SFU. Joins meetings in under 2 seconds without installing executables.
+5. **🛡️ 100% Self-Contained Auth & DB**: Native user storage with bcrypt hashing and signed JWT session tokens — no external databases with 7-day inactivity pause limits.
 
 ---
 
@@ -47,7 +48,7 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
 | **AI Availability & Cost** | **Free & open** via Groq (LLaMA 3.3 70B) | Requires Zoom Pro + AI Companion add-ons | Copilot requires **\$30/user/month** license | Basic AI in top-tier plans |
 | **Recording & Privacy** | **Client-side local recording**: 0 cloud exposure, instant `.webm` download | Stored on third-party servers; paid storage limits | Stored in OneDrive / Google Drive; admin restricted | Stored on Zoho servers with storage caps |
 | **System Footprint** | **100% Web-Native**; instant joining without bloated app downloads | Heavy desktop clients with frequent updates | High memory consumption (Electron / WebView) | Web-based, but requires plugins for certain tools |
-| **Deployment Model** | **Modular & White-Label ready** (LiveKit + Supabase + Groq) | Proprietary closed ecosystem | Closed enterprise walled-garden | Proprietary SaaS |
+| **Deployment Model** | **Modular & White-Label ready** (LiveKit + Native DB + Groq) | Proprietary closed ecosystem | Closed enterprise walled-garden | Proprietary SaaS |
 
 ---
 
@@ -56,7 +57,7 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
 ```
 [ User Browser ]
        │
-       ├─► Supabase Auth (JWT Session Verification)
+       ├─► Native Auth & DB (JWT Session Verification, bcrypt, persistent user store)
        ├─► LiveKit SFU (Ultra-Low Latency Audio, HD Video & Screen Sharing)
        ├─► Web Speech Engine (Continuous Multilingual Speech-to-Text)
        ├─► WebRTC Data Channels (Live Peer-to-Peer Subtitle Broadcasting)
@@ -64,6 +65,7 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
        │
 [ Express / Node Backend ] (Render)
        │
+       ├─► Auth Service (/api/auth/signup, /api/auth/login, /api/auth/me)
        ├─► Token Service (Cryptographically signed LiveKit Access Tokens)
        └─► Groq AI Service (LLaMA 3.3 70B Versatile for Action Items & Minutes)
 ```
@@ -75,7 +77,7 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons, Framer Motion
 - **Real-Time Video/Audio**: LiveKit Client & Components (`@livekit/components-react`)
 - **Backend**: Express.js, TypeScript, LiveKit Server SDK
-- **Authentication**: Supabase Auth (JWT validation)
+- **Authentication & Database**: Native bcrypt password encryption, signed JWTs, persistent JSON store
 - **AI Engine**: Groq Cloud SDK (`llama-3.3-70b-versatile`)
 - **Deployment**: Firebase Hosting (Frontend), Render (Backend API)
 
@@ -85,10 +87,13 @@ While legacy tools like Zoom, Microsoft Teams, and Google Meet are heavy, expens
 
 ```bash
 AuraClave_Project/
-├── backend/                  # Express + LiveKit Server SDK + Groq AI API
+├── backend/                  # Express + LiveKit Server SDK + Groq AI API + Native Auth
+│   ├── data/
+│   │   └── users.json        # Persistent user records
 │   ├── src/
-│   │   ├── auth.ts           # Supabase JWT token verification
-│   │   └── server.ts         # /api/token & /api/ai endpoints
+│   │   ├── auth.ts           # JWT token generation & verification
+│   │   ├── db.ts             # Atomic user database operations
+│   │   └── server.ts         # Express server & endpoints
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── render.yaml           # One-click Render deployment configuration
@@ -99,7 +104,7 @@ AuraClave_Project/
 │   ├── src/
 │   │   ├── components/       # Brand, LanguageSelector, MeetingExtensions, Protected
 │   │   ├── contexts/         # AuthContext, LanguageContext (11 languages)
-│   │   ├── lib/              # Supabase client initialization
+│   │   ├── lib/              # Auth API client
 │   │   ├── pages/            # Home, Auth, Dashboard, Meeting, Setup
 │   │   ├── App.tsx           # Route definitions
 │   │   └── index.css         # Custom dark theme & responsive UI
@@ -120,7 +125,6 @@ AuraClave_Project/
 - **npm** or **pnpm**
 - Accounts with:
   - [LiveKit Cloud](https://cloud.livekit.io/) (Free tier available)
-  - [Supabase](https://supabase.com/) (Free tier available)
   - [Groq](https://groq.com/) (Free fast LLaMA 3.3 inference)
 
 ---
@@ -144,8 +148,7 @@ cd AuraClave
 2. Create `.env` in `backend/`:
    ```env
    PORT=5000
-   SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-   SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+   JWT_SECRET=auraclave-super-secret-jwt-key-2026
    LIVEKIT_URL=wss://YOUR_PROJECT.livekit.cloud
    LIVEKIT_API_KEY=YOUR_LIVEKIT_API_KEY
    LIVEKIT_API_SECRET=YOUR_LIVEKIT_API_SECRET
@@ -170,8 +173,6 @@ cd AuraClave
 
 2. Create `.env.local` in `nexmeet/`:
    ```env
-   VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-   VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
    VITE_API_URL=http://localhost:5000
    ```
 
@@ -215,8 +216,8 @@ firebase deploy --only hosting
 ### Backend (Render)
 1. Fork or push your repository to GitHub.
 2. In Render, select **New Web Service** and connect the `backend` directory.
-3. Add the environment variables (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GROQ_API_KEY`).
-4. Build command: `npm install && npm run build`
+3. Add the environment variables (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GROQ_API_KEY`, `JWT_SECRET`).
+4. Build command: `npm install --include=dev && npm run build`
 5. Start command: `npm start`
 
 ---
