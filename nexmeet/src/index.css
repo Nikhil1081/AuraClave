@@ -104,9 +104,10 @@
 }
 
 .reaction-picker {
-  position: absolute;
-  bottom: 54px;
+  position: fixed;
+  bottom: 82px;
   left: 50%;
+  z-index: 1000;
   display: flex;
   gap: 4px;
   padding: 8px;
@@ -115,6 +116,7 @@
   border-radius: 14px;
   background: #292a2d;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
 }
 
 .reaction-picker button {
@@ -126,6 +128,9 @@
   border-radius: 9px;
   background: transparent;
   font-size: 20px;
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .reaction-picker button:hover {
