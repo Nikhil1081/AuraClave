@@ -4,7 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
-import { attachSfu } from "./sfu.js";
+import { AccessToken } from "livekit-server-sdk";
 import {
   requestToJoin,
   checkAdmission,
@@ -30,6 +30,40 @@ app.get("/", (_req: Request, res: Response) => {
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy" });
+});
+
+app.post("/api/livekit/token", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const livekitUrl = process.env.LIVEKIT_URL;
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const roomName = typeof req.body?.roomName === "string" ? req.body.roomName.trim() : "";
+
+    if (!livekitUrl || !apiKey || !apiSecret) {
+      return res.status(503).json({ error: "LiveKit SFU is not configured on the server." });
+    }
+    if (!roomName || roomName.length > 128) {
+      return res.status(400).json({ error: "A valid meeting room is required." });
+    }
+
+    const token = new AccessToken(apiKey, apiSecret, {
+      identity: user.id,
+      name: user.user_metadata.full_name || user.email,
+      ttl: "2h"
+    });
+    token.addGrant({
+      room: roomName,
+      roomJoin: true,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true
+    });
+
+    return res.status(200).json({ url: livekitUrl, token: await token.toJwt() });
+  } catch (err: any) {
+    return res.status(401).json({ error: err?.message || "Unable to create LiveKit token." });
+  }
 });
 
 // Authentication: Sign Up
@@ -314,13 +348,6 @@ app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) =>
 
 const server = http.createServer(app);
 
-void attachSfu(server)
-  .then(() => {
-    server.listen(port, () => {
-      console.log(`AuraClave API and mediasoup SFU running on port ${port}`);
-    });
-  })
-  .catch((error: unknown) => {
-    console.error("Unable to start the mediasoup SFU.", error);
-    process.exitCode = 1;
-  });
+server.listen(port, () => {
+  console.log(`AuraClave API running on port ${port}`);
+});

@@ -14,11 +14,9 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
-      - key: MEDIASOUP_ANNOUNCED_IP
+      - key: LIVEKIT_URL
         sync: false
-      - key: MEDIASOUP_LISTEN_IP
-        value: 0.0.0.0
-      - key: MEDIASOUP_MIN_PORT
-        value: 40000
-      - key: MEDIASOUP_MAX_PORT
-        value: 49999
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false

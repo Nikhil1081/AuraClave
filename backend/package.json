@@ -22,7 +22,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",
-    "mediasoup": "^3.32.2",
+    "livekit-server-sdk": "^2.19.2",
     "typescript": "~5.8.3",
     "ws": "^8.22.2"
   },

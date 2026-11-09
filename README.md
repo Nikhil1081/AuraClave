@@ -4,10 +4,10 @@
 
   # 🌟 AuraClave
   ### The AI-Powered Video Meeting Platform for Everyone
-  *Simple meetings • mediasoup-powered video • Multilingual subtitles • Executive AI notes*
+  *Simple meetings • LiveKit-powered video • Multilingual subtitles • Executive AI notes*
 
   [![Live Demo](https://img.shields.io/badge/Live_Demo-auraclave--app--1081.web.app-7c3aed?style=for-the-badge&logo=firebase&logoColor=white)](https://auraclave-app-1081.web.app)
-  [![AuraWeave RTC](https://img.shields.io/badge/AuraWeave_RTC™-mediasoup_SFU-00c853?style=for-the-badge&logo=webrtc&logoColor=white)](#)
+  [![AuraWeave RTC](https://img.shields.io/badge/AuraWeave_RTC™-LiveKit_SFU-00c853?style=for-the-badge&logo=webrtc&logoColor=white)](#)
   [![React 19](https://img.shields.io/badge/React_19-Vite_7-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
   [![Groq AI](https://img.shields.io/badge/Groq_AI-GPT--OSS--120B-f97316?style=for-the-badge&logo=fastapi&logoColor=white)](https://groq.com/)
   [![Media](https://img.shields.io/badge/Media-SFU-8b5cf6?style=for-the-badge)](#)
@@ -34,13 +34,14 @@ captions, and AI-generated notes.
 ## 💡 Why Did We Build This?
 
 AuraClave uses **AuraWeave RTC™** as the name for its meeting media layer.
-AuraWeave now uses **mediasoup**, an open-source SFU (Selective Forwarding
-Unit). Each participant sends audio and video once to the AuraClave server,
-which forwards it to the other participants. This is more practical for larger
-meetings than making every browser connect directly to every other browser.
+AuraWeave now uses **LiveKit**, an SFU (Selective Forwarding Unit). Each
+participant sends audio and video once to LiveKit, which forwards it to the
+other participants. This is more practical for larger meetings than making
+every browser connect directly to every other browser.
 
-mediasoup has no per-meeting or per-participant license fee. The server,
-bandwidth, and hardware still determine the actual capacity and operating cost.
+LiveKit can be self-hosted with its Community Edition or used through LiveKit
+Cloud. The hosting provider, bandwidth, and LiveKit plan determine the actual
+capacity and cost.
 
 ---
 
@@ -51,7 +52,7 @@ Every participant can:
 - Turn their microphone on or off.
 - Start or stop their camera.
 - Share their screen independently of their camera.
-- Hear and see other participants through the mediasoup SFU.
+- Hear and see other participants through the LiveKit SFU.
 - Use chat and leave the meeting at any time.
 
 ### 📝 2. Human-Like AI Meeting Notes (Powered by Groq)
@@ -89,14 +90,14 @@ Break language barriers in real-time. AuraClave listens to speakers and broadcas
 
 | Feature | 🌟 **AuraClave** | 🟦 **Zoom / Webex** | 🟩 **Google Meet / MS Teams** |
 | :--- | :--- | :--- | :--- |
-| **Price** | No mediasoup license fee; hosting still has costs | $15 – $25/host/mo | $6 – $30/user/mo |
-| **Capacity** | Depends on server and network resources | Depends on plan | Depends on plan |
+| **Price** | Depends on your LiveKit hosting choice | $15 – $25/host/mo | $6 – $30/user/mo |
+| **Capacity** | Depends on LiveKit hosting and server resources | Depends on plan | Depends on plan |
 | **Time Limit** | No application timer; provider limits may apply | Depends on plan | Depends on plan |
 | **AI Meeting Minutes** | **Included Free** (Sub-second Groq AI) | Requires Zoom Pro + AI Add-on | Copilot requires **\$30/user/mo** |
 | **Live Subtitles** | **11 Indian Languages + English** | English only (Dialects locked to paid) | Basic translation locked in Enterprise |
 | **Meeting Recording** | **Instant Local Download** (0 server cost) | Stored on third-party cloud with storage caps | Requires Google One / OneDrive subscription |
 | **Installation** | **None** (Works in Chrome, Edge, Safari, Brave) | Requires desktop software download | Requires app installation or heavy web client |
-| **Media architecture** | Self-hosted mediasoup SFU | Provider-managed | Provider-managed |
+| **Media architecture** | LiveKit SFU (self-hosted or LiveKit Cloud) | Provider-managed | Provider-managed |
 
 ---
 
@@ -110,16 +111,16 @@ flowchart TD
         UI["AuraClave Responsive Web UI"]
         MediaRec["Client-side MediaRecorder (Local .webm)"]
         Speech["Web Speech Subtitle Engine (11 Languages)"]
-        AuraClient["AuraWeave RTC™ mediasoup-client"]
+        AuraClient["AuraWeave RTC™ LiveKit Client"]
     end
 
     subgraph SignalLayer ["Application API: Express (Render)"]
-        Token["Authenticated SFU WebSocket"]
+        Token["LiveKit token endpoint"]
         AuthDB["Native Auth & JSON Store (bcrypt + JWT)"]
     end
 
-    subgraph MediaLayer ["Media: mediasoup SFU"]
-        Sfu["AuraClave mediasoup server"]
+    subgraph MediaLayer ["Media: LiveKit SFU"]
+        LiveKit["LiveKit media server"]
     end
 
     subgraph AIEngine ["AI Intelligence: Groq Cloud"]
@@ -130,8 +131,8 @@ flowchart TD
     UI --> Speech
     UI --> MediaRec
 
-    AuraClient <==>|"WebRTC audio/video"| Sfu
-    AuraClient -->|"JWT-authenticated signaling"| Token
+    AuraClient <==>|"WebRTC audio/video"| LiveKit
+    AuraClient -->|"Request short-lived token"| Token
     UI -->|"HTTP API & Profile"| AuthDB
     UI -->|"Synthesize Minutes"| Groq
 ```
@@ -139,14 +140,15 @@ flowchart TD
 ### 🧠 How AuraWeave RTC™ Works
 
 1. **Secure room access**:
-   The browser signs in to the Express API and opens a JWT-authenticated SFU
-   WebSocket. The JWT secret stays on the server and is never sent to peers.
-2. **mediasoup SFU media**:
-   The browser connects to the AuraClave SFU for encrypted audio, camera video,
-   and screen sharing. Everyone uses the same participant permissions.
-3. **Long-running rooms**:
-   There is no application meeting timer. A process manager can restart the
-   backend/SFU after a crash or machine reboot.
+   The browser signs in to the Express API and requests a short-lived LiveKit
+   participant token. The API secret stays on Render and is never sent to the
+   browser.
+2. **LiveKit SFU media**:
+   The browser connects to LiveKit for encrypted audio, camera video, and
+   screen sharing. Everyone uses the same participant permissions.
+3. **Automatic token refresh**:
+   The browser requests a fresh token before the current one expires and
+   reconnects while restoring the active microphone, camera, and screen share.
 4. **Sub-second Groq AI Processing**:
    When **AI Notes** is triggered, meeting conversation notes are sent to Groq's high-speed inference engine (`openai/gpt-oss-120b`), returning structured executive minutes in under 500 milliseconds.
 
@@ -157,7 +159,7 @@ flowchart TD
 ### Prerequisites
 - Node.js (v18 or higher)
 - Free [Groq API Key](https://console.groq.com/) for AI Meeting Summaries
-- A server or computer that can run a mediasoup SFU with public UDP/TCP ports
+- A LiveKit Cloud project, or a self-hosted LiveKit Community Edition server
 
 ### 1. Clone the Repository
 ```bash
@@ -177,10 +179,9 @@ PORT=5000
 JWT_SECRET=your-random-secret-key
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-120b
-MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_IP=your-public-server-ip
-MEDIASOUP_MIN_PORT=40000
-MEDIASOUP_MAX_PORT=49999
+LIVEKIT_URL=wss://your-livekit-host.example.com
+LIVEKIT_API_KEY=your-livekit-api-key
+LIVEKIT_API_SECRET=your-livekit-api-secret
 ```
 
 Start the backend:
@@ -211,45 +212,48 @@ configuration before starting it.
 - **Application & AI API**: Hosted on Render
   👉 `https://auraclave-api.onrender.com`
 
-### Self-hosted mediasoup SFU setup
+### LiveKit SFU setup
 
-AuraWeave now uses mediasoup, a free and open-source SFU library, inside the
-AuraClave backend. The backend serves authenticated WebSocket signaling at
-`/api/sfu` and creates the WebRTC media transports. mediasoup does not charge
-per meeting or per participant.
+AuraWeave now uses LiveKit Community Edition as its media SFU. The LiveKit server
+must run separately from the Render API on a host that supports TCP and UDP
+WebRTC ports. The repository includes [`docker-compose.livekit.yml`](./docker-compose.livekit.yml)
+and [`livekit.yaml`](./livekit.yaml) for a self-hosted deployment.
 
-Set these values in the backend environment:
+Set these values in the Render API environment:
 
 ```text
-MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_IP=your-public-server-ip
-MEDIASOUP_MIN_PORT=40000
-MEDIASOUP_MAX_PORT=49999
+LIVEKIT_URL=wss://your-livekit-host.example.com
+LIVEKIT_API_KEY=your-generated-key
+LIVEKIT_API_SECRET=your-generated-secret
 ```
 
-A normal Render web service is not a suitable production mediasoup host because
-the SFU needs persistent public UDP networking for WebRTC media. Run the
-backend/SFU on a VPS, dedicated machine, or computer you control, and open the
-configured UDP/TCP port range in its firewall.
+Do not expose `LIVEKIT_API_SECRET` to Firebase or frontend code. Until these
+variables point to a running LiveKit server, the API will return
+`LiveKit SFU is not configured on the server` and meetings will not connect.
+
+For LiveKit Cloud, copy the WebSocket URL, API key, and API secret from the
+LiveKit project dashboard. For self-hosting, use the included
+[`docker-compose.livekit.yml`](./docker-compose.livekit.yml) and
+[`livekit.yaml`](./livekit.yaml) on a machine with publicly reachable TCP and
+UDP WebRTC ports. A normal Render web service is not a complete self-hosted
+LiveKit media server.
 
 ### Deploying the project
 
-1. **Your SFU host** runs the `backend` API and mediasoup. Add `JWT_SECRET`,
-   `GROQ_API_KEY`, `MEDIASOUP_LISTEN_IP`, `MEDIASOUP_ANNOUNCED_IP`,
-   `MEDIASOUP_MIN_PORT`, and `MEDIASOUP_MAX_PORT` as environment variables.
-   Keep the host awake and the configured UDP/TCP ports open.
+1. **Render** runs the `backend` API. Add `JWT_SECRET`, `GROQ_API_KEY`,
+   `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` as environment
+   variables in Render. Keep API secrets only on Render.
 2. **Firebase Hosting** serves the built `nexmeet` frontend. Firebase contains
-   public browser code, so never put `JWT_SECRET` or other private keys there.
-3. If the API and SFU run on another host, set the frontend API URL to that
-   host. An HTTP-only reverse proxy cannot replace the required WebRTC media
-   ports.
+   public browser code, so never put `LIVEKIT_API_SECRET`, `JWT_SECRET`, or
+   other private keys there.
+3. After changing backend variables, save them in Render and redeploy the
+   backend. After changing frontend code, build and deploy the frontend with
+   `npm run build` and the Firebase Hosting deploy command.
 
-The mediasoup connection has no application meeting timer. A meeting can run
-for 5–6 hours or longer while the host, process, network, and participant
-browsers remain available. Use systemd, PM2, or Docker with an automatic
-restart policy so the backend/SFU starts after a reboot or recovers after a
-crash. This removes software license fees, but it does not make CPU, bandwidth,
-electricity, hardware, or participant capacity unlimited.
+The frontend refreshes participant tokens automatically during long meetings.
+This prevents normal application token expiry from ending a meeting, but it
+does not bypass LiveKit Cloud quotas, billing, server capacity, browser limits,
+or network interruptions.
 
 ---
 
@@ -262,7 +266,6 @@ AuraClave_Project/
 │   │   └── users.json          # Persistent user database store
 │   ├── src/
 │   │   ├── auraweave.ts        # Legacy signaling code retained for reference
-│   │   ├── sfu.ts              # mediasoup worker, rooms, transports, and signaling
 │   │   ├── auth.ts             # JWT authentication & session verification
 │   │   ├── db.ts               # User password hashing & atomic storage
 │   │   ├── roomManager.ts      # Host admission & waiting room queues
@@ -282,7 +285,7 @@ AuraClave_Project/
 │   │   │   ├── AuthContext.tsx           # User authentication state
 │   │   │   └── LanguageContext.tsx       # Multilingual translations
 │   │   ├── lib/
-│   │   │   ├── auraweave.ts              # mediasoup-client SFU adapter
+│   │   │   ├── auraweave.ts              # LiveKit SFU client adapter
 │   │   │   └── auth.ts                   # Token & session utilities
 │   │   ├── pages/
 │   │   │   ├── Dashboard.tsx             # User hub & quick meeting launcher
@@ -304,7 +307,7 @@ AuraClave_Project/
 - **Local recording**: Recordings stay on your machine. AuraClave does not upload meeting videos.
 - **Client-Side Profile Image Compression**: Custom profile pictures are compressed to lightweight 160×160 thumbnails directly on your device before saving.
 - **Slender JWT Auth**: Authentication tokens are kept minimal to prevent header bloat and guarantee rapid page loads.
-- **Encrypted media transport**: mediasoup uses WebRTC DTLS-SRTP encryption while media travels between browsers and the SFU. This is transport encryption, not a promise of end-to-end encryption from the application.
+- **Encrypted media transport**: LiveKit uses WebRTC DTLS-SRTP encryption while media travels between browsers and the SFU. This is transport encryption, not a promise of end-to-end encryption from the application.
 
 ---
 

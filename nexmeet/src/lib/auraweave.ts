@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Device } from "mediasoup-client";
-import type { Consumer, Producer, RtpCapabilities, Transport } from "mediasoup-client/types";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  type Participant,
+  type RemoteTrack,
+  type RemoteTrackPublication
+} from "livekit-client";
 import { getApiBase } from "./auth";
 
 export type AuraRole = "host" | "presenter" | "audience";
@@ -34,58 +40,38 @@ export interface ChatMessage {
   isSelf: boolean;
 }
 
-interface PeerInfo {
-  peerId: string;
-  userId: string;
-  name: string;
-  avatarUrl: string;
-}
-
-interface SfuMessage {
-  type: string;
-  requestId?: string;
-  message?: ChatMessage;
-  peer?: PeerInfo;
-  peers?: PeerInfo[];
-  producerId?: string;
-  consumer?: {
-    id: string;
-    producerId: string;
-    kind: "audio" | "video";
-    rtpParameters: unknown;
-    peer: PeerInfo;
-  };
-  producers?: Array<{
-    producerId: string;
-    peer: PeerInfo;
-    kind: "audio" | "video";
-    source: string;
-  }>;
-  params?: Record<string, unknown>;
-  rtpCapabilities?: RtpCapabilities;
-  direction?: "send" | "recv";
-  error?: string;
-}
-
 function getApiUrl(path: string): string {
   const base = getApiBase();
   return base ? `${base}${path}` : path;
 }
 
-function getSocketUrl(roomName: string): string {
-  const apiUrl = getApiUrl("");
-  const parsed = new URL(apiUrl || window.location.origin, window.location.origin);
-  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
-  parsed.pathname = "/api/sfu";
-  parsed.search = new URLSearchParams({
-    room: roomName,
-    token: localStorage.getItem("auraclave_auth_token") || ""
-  }).toString();
-  return parsed.toString();
+function participantPeerId(participant: Participant): string {
+  return participant.identity;
 }
 
-function createRequestId() {
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+function participantStream(participant: Participant): MediaStream {
+  const tracks: MediaStreamTrack[] = [];
+  participant.trackPublications.forEach((publication) => {
+    if (publication.track?.mediaStreamTrack) {
+      tracks.push(publication.track.mediaStreamTrack);
+    }
+  });
+  return new MediaStream(tracks);
+}
+
+function peerFromParticipant(participant: Participant): AuraWeavePeer {
+  const stream = participantStream(participant);
+  return {
+    peerId: participantPeerId(participant),
+    userId: participant.identity,
+    name: participant.name || participant.identity,
+    avatarUrl: "",
+    role: "presenter",
+    stream,
+    isAudioMuted: !participant.isMicrophoneEnabled,
+    isVideoMuted: !participant.isCameraEnabled && !participant.isScreenShareEnabled,
+    isScreenSharing: participant.isScreenShareEnabled
+  };
 }
 
 export function useAuraWeave({
@@ -97,6 +83,7 @@ export function useAuraWeave({
   user: { id: string; name: string; avatarUrl?: string } | null;
   isHost: boolean;
 }) {
+  const [room] = useState(() => new Room({ adaptiveStream: true, dynacast: true }));
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peers, setPeers] = useState<Map<string, AuraWeavePeer>>(new Map());
   const [isAudioMuted, setIsAudioMuted] = useState(true);
@@ -108,255 +95,215 @@ export function useAuraWeave({
   const [error, setError] = useState<string | null>(null);
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
-  const socketRef = useRef<WebSocket | null>(null);
-  const deviceRef = useRef<Device | null>(null);
-  const sendTransportRef = useRef<Transport | null>(null);
-  const recvTransportRef = useRef<Transport | null>(null);
-  const producersRef = useRef<Map<string, Producer>>(new Map());
-  const consumersRef = useRef<Map<string, Consumer>>(new Map());
-  const peerInfoRef = useRef<Map<string, PeerInfo>>(new Map());
-  const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
-  const pendingRef = useRef<Map<string, (message: SfuMessage) => void>>(new Map());
-  const localTracksRef = useRef<Map<string, MediaStreamTrack>>(new Map());
+  const syncLocal = useCallback(() => {
+    setLocalStream(participantStream(room.localParticipant));
+    setIsAudioMuted(!room.localParticipant.isMicrophoneEnabled);
+    setIsVideoMuted(
+      !room.localParticipant.isCameraEnabled && !room.localParticipant.isScreenShareEnabled
+    );
+    setIsScreenSharing(room.localParticipant.isScreenShareEnabled);
+  }, [room]);
 
   const syncPeers = useCallback(() => {
     const next = new Map<string, AuraWeavePeer>();
-    for (const [peerId, info] of peerInfoRef.current) {
-      const stream = peerStreamsRef.current.get(peerId);
-      next.set(peerId, {
-        ...info,
-        role: "presenter",
-        stream,
-        isAudioMuted: !stream?.getAudioTracks().some((track) => track.enabled),
-        isVideoMuted: !stream?.getVideoTracks().some((track) => track.enabled),
-        isScreenSharing: Boolean(stream?.getVideoTracks().some((track) => track.label.includes("screen")))
-      });
-    }
+    room.remoteParticipants.forEach((participant) => {
+      next.set(participant.identity, peerFromParticipant(participant));
+    });
     setPeers(next);
-    setTotalParticipants(peerInfoRef.current.size + 1);
-  }, []);
+    setTotalParticipants(room.numParticipants || 1);
+  }, [room]);
 
-  const request = useCallback((type: string, payload: Record<string, unknown> = {}) => {
-    return new Promise<SfuMessage>((resolve, reject) => {
-      const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        reject(new Error("The meeting connection is not ready."));
-        return;
+  const refreshParticipant = useCallback(
+    (participant: Participant) => {
+      if (participant === room.localParticipant) {
+        syncLocal();
+      } else {
+        syncPeers();
       }
-      const requestId = createRequestId();
-      const timeout = window.setTimeout(() => {
-        pendingRef.current.delete(requestId);
-        reject(new Error(`SFU request timed out: ${type}`));
-      }, 15000);
-      pendingRef.current.set(requestId, (message) => {
-        window.clearTimeout(timeout);
-        if (message.type === "error") reject(new Error(message.error || "SFU request failed."));
-        else resolve(message);
-      });
-      socket.send(JSON.stringify({ type, requestId, ...payload }));
-    });
-  }, []);
-
-  const syncLocal = useCallback(() => {
-    const stream = new MediaStream([...localTracksRef.current.values()]);
-    setLocalStream(stream);
-    setIsAudioMuted(!stream.getAudioTracks().some((track) => track.enabled));
-    setIsVideoMuted(!stream.getVideoTracks().some((track) => track.enabled));
-    setIsScreenSharing(Boolean(producersRef.current.get("screen")));
-  }, []);
-
-  const consumeProducer = useCallback(async (producerId: string, peer: PeerInfo) => {
-    const device = deviceRef.current;
-    const transport = recvTransportRef.current;
-    if (!device || !transport || consumersRef.current.has(producerId)) return;
-    peerInfoRef.current.set(peer.peerId, peer);
-    const response = await request("consume", {
-      transportId: transport.id,
-      producerId,
-      rtpCapabilities: device.rtpCapabilities
-    });
-    if (!response.consumer) return;
-    const consumer = await transport.consume({
-      id: response.consumer.id,
-      producerId: response.consumer.producerId,
-      kind: response.consumer.kind,
-      rtpParameters: response.consumer.rtpParameters as never
-    });
-    consumersRef.current.set(producerId, consumer);
-    const stream = peerStreamsRef.current.get(peer.peerId) || new MediaStream();
-    stream.addTrack(consumer.track);
-    peerStreamsRef.current.set(peer.peerId, stream);
-    await request("resumeConsumer", { consumerId: consumer.id });
-    syncPeers();
-  }, [request, syncPeers]);
-
-  const setupTransport = useCallback(async (direction: "send" | "recv") => {
-    const response = await request("createTransport", { direction });
-    if (!response.params) throw new Error("SFU returned incomplete transport details.");
-    const device = deviceRef.current;
-    if (!device) throw new Error("The mediasoup device is not ready.");
-    const transport = direction === "send"
-      ? device.createSendTransport(response.params as never)
-      : device.createRecvTransport(response.params as never);
-    transport.on("connect", ({ dtlsParameters }, callback, errback) => {
-      request("connectTransport", { transportId: transport.id, dtlsParameters })
-        .then(() => callback())
-        .catch((reason) => errback(reason instanceof Error ? reason : new Error("Transport connection failed.")));
-    });
-    if (direction === "send") {
-      transport.on("produce", ({ kind, rtpParameters, appData }, callback, errback) => {
-        request("produce", { transportId: transport.id, kind, rtpParameters, appData })
-          .then((message) => message.producerId ? callback({ id: message.producerId }) : errback(new Error("SFU did not return a producer ID.")))
-          .catch((reason) => errback(reason instanceof Error ? reason : new Error("Unable to publish media.")));
-      });
-      sendTransportRef.current = transport;
-    } else {
-      recvTransportRef.current = transport;
-    }
-    return transport;
-  }, [request]);
+    },
+    [room, syncLocal, syncPeers]
+  );
 
   useEffect(() => {
     if (!roomName || !user?.id) return;
     let active = true;
-    const socket = new WebSocket(getSocketUrl(roomName));
-    socketRef.current = socket;
 
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data) as SfuMessage;
-      if (message.requestId) {
-        pendingRef.current.get(message.requestId)?.(message);
-        pendingRef.current.delete(message.requestId);
-        return;
-      }
-      if (message.type === "joined") {
-        if (message.peer) peerInfoRef.current.set(message.peer.peerId, message.peer);
-        for (const peer of message.peers || []) peerInfoRef.current.set(peer.peerId, peer);
-      } else if (message.type === "peerJoined" && message.peer) {
-        peerInfoRef.current.set(message.peer.peerId, message.peer);
-        syncPeers();
-      } else if (message.type === "peerLeft" && message.peer) {
-        peerInfoRef.current.delete(message.peer.peerId);
-        peerStreamsRef.current.delete(message.peer.peerId);
-        syncPeers();
-      } else if (message.type === "newProducer" && message.producerId && message.peer) {
-        void consumeProducer(message.producerId, message.peer);
-      } else if (message.type === "chat" && message.message) {
-        setChatMessages((previous) => [...previous, { ...message.message!, isSelf: false }]);
-      } else if (message.type === "caption" && message.message) {
-        onCaptionReceivedRef.current?.(message.message.senderName, message.message.text);
-      } else if (message.type === "error") {
-        setError(message.error || "The SFU returned an error.");
-      }
+    const onTrackChanged = (_track?: RemoteTrack, _publication?: RemoteTrackPublication, participant?: Participant) => {
+      if (participant) refreshParticipant(participant);
     };
-
-    socket.onopen = async () => {
+    const onParticipantChanged = (_publication: unknown, participant: Participant) =>
+      refreshParticipant(participant);
+    const onData = (payload: Uint8Array, participant?: Participant) => {
       try {
-        const joined = await request("getRouterRtpCapabilities");
-        const device = new Device();
-        await device.load({ routerRtpCapabilities: joined.rtpCapabilities! });
-        deviceRef.current = device;
-        await setupTransport("send");
-        await setupTransport("recv");
-        const audio = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioTrack = audio.getAudioTracks()[0];
-        if (audioTrack && sendTransportRef.current) {
-          const producer = await sendTransportRef.current.produce({ track: audioTrack, appData: { source: "microphone" } });
-          producersRef.current.set("microphone", producer);
-          localTracksRef.current.set("microphone", audioTrack);
+        const message = JSON.parse(new TextDecoder().decode(payload));
+        if (message.type === "chat") {
+          setChatMessages((previous) => [
+            ...previous,
+            {
+              id: message.id,
+              peerId: participant?.identity || "",
+              senderName: participant?.name || "Participant",
+              senderAvatar: "",
+              text: message.text,
+              time: message.time,
+              isSelf: false
+            }
+          ]);
+        } else if (message.type === "caption") {
+          onCaptionReceivedRef.current?.(message.speaker, message.text);
         }
-        syncLocal();
-        const existing = await request("getExistingProducers");
-        for (const producer of existing.producers || []) {
-          await consumeProducer(producer.producerId, producer.peer);
-        }
-        if (active) {
-          setConnected(true);
-          syncPeers();
-        }
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Unable to connect to the meeting SFU.");
+      } catch {
+        setError("Received invalid meeting data from LiveKit.");
       }
     };
-    socket.onerror = () => setError("Unable to connect to the AuraClave SFU.");
 
+    async function connect() {
+      try {
+        const response = await fetch(getApiUrl("/api/livekit/token"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("auraclave_auth_token") || ""}`
+          },
+          body: JSON.stringify({ roomName })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Unable to connect to LiveKit.");
+
+        room
+          .on(RoomEvent.TrackSubscribed, onTrackChanged)
+          .on(RoomEvent.TrackUnsubscribed, onTrackChanged)
+          .on(RoomEvent.LocalTrackPublished, () => syncLocal())
+          .on(RoomEvent.LocalTrackUnpublished, () => syncLocal())
+          .on(RoomEvent.TrackMuted, onParticipantChanged)
+          .on(RoomEvent.TrackUnmuted, onParticipantChanged)
+          .on(RoomEvent.ParticipantConnected, (participant) => refreshParticipant(participant))
+          .on(RoomEvent.ParticipantDisconnected, () => syncPeers())
+          .on(RoomEvent.DataReceived, onData);
+
+        await room.connect(data.url, data.token);
+        if (!active) {
+          await room.disconnect();
+          return;
+        }
+        await room.localParticipant.setMicrophoneEnabled(true);
+        syncLocal();
+        syncPeers();
+        setConnected(true);
+
+        const refreshToken = async () => {
+          try {
+            const refreshResponse = await fetch(getApiUrl("/api/livekit/token"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${localStorage.getItem("auraclave_auth_token") || ""}`
+              },
+              body: JSON.stringify({ roomName })
+            });
+            const refreshed = await refreshResponse.json();
+            if (!refreshResponse.ok) {
+              throw new Error(refreshed.error || "Unable to refresh the meeting token.");
+            }
+
+            const microphoneEnabled = room.localParticipant.isMicrophoneEnabled;
+            const cameraEnabled = room.localParticipant.isCameraEnabled;
+            const screenShareEnabled = room.localParticipant.isScreenShareEnabled;
+
+            // Reconnect before the two-hour token expires. Keeping tracks alive
+            // avoids ending the meeting when LiveKit rotates the credentials.
+            await room.disconnect(false);
+            await room.connect(refreshed.url, refreshed.token);
+            await room.localParticipant.setMicrophoneEnabled(microphoneEnabled);
+            await room.localParticipant.setCameraEnabled(cameraEnabled);
+            if (screenShareEnabled) {
+              await room.localParticipant.setScreenShareEnabled(true);
+            }
+            syncLocal();
+            syncPeers();
+          } catch (refreshError) {
+            setError(
+              refreshError instanceof Error
+                ? `Meeting token refresh failed: ${refreshError.message}`
+                : "Meeting token refresh failed."
+            );
+          }
+        };
+
+        const refreshTimer = window.setInterval(refreshToken, 90 * 60 * 1000);
+        return () => window.clearInterval(refreshTimer);
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Unable to connect to the meeting SFU.");
+        }
+      }
+    }
+
+    let cleanupRefresh: (() => void) | undefined;
+    connect().then((cleanup) => {
+      cleanupRefresh = cleanup;
+    });
     return () => {
       active = false;
-      for (const track of localTracksRef.current.values()) track.stop();
-      socket.close();
-      sendTransportRef.current?.close();
-      recvTransportRef.current?.close();
+      cleanupRefresh?.();
+      room.removeAllListeners();
+      room.disconnect();
       setConnected(false);
     };
-  }, [consumeProducer, isHost, request, roomName, setupTransport, syncLocal, syncPeers, user?.id]);
+  }, [room, roomName, user?.id, isHost, refreshParticipant, syncLocal, syncPeers]);
 
   const toggleAudio = useCallback(async () => {
-    const producer = producersRef.current.get("microphone");
-    if (!producer) return;
-    if (producer.paused) await producer.resume();
-    else await producer.pause();
-    setIsAudioMuted(producer.paused);
-  }, []);
+    await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
+    syncLocal();
+  }, [room, syncLocal]);
 
   const toggleVideo = useCallback(async () => {
-    const existing = producersRef.current.get("camera");
-    if (existing) {
-      existing.close();
-      producersRef.current.delete("camera");
-      localTracksRef.current.get("camera")?.stop();
-      localTracksRef.current.delete("camera");
-      syncLocal();
-      return;
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    const track = stream.getVideoTracks()[0];
-    if (!track || !sendTransportRef.current) return;
-    const producer = await sendTransportRef.current.produce({ track, appData: { source: "camera" } });
-    producersRef.current.set("camera", producer);
-    localTracksRef.current.set("camera", track);
+    await room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled);
     syncLocal();
-  }, [syncLocal]);
+  }, [room, syncLocal]);
 
   const toggleScreenShare = useCallback(async () => {
-    const existing = producersRef.current.get("screen");
-    if (existing) {
-      existing.close();
-      producersRef.current.delete("screen");
-      localTracksRef.current.get("screen")?.stop();
-      localTracksRef.current.delete("screen");
-      syncLocal();
-      return;
-    }
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-    const track = stream.getVideoTracks()[0];
-    if (!track || !sendTransportRef.current) return;
-    track.onended = () => void toggleScreenShare();
-    const producer = await sendTransportRef.current.produce({ track, appData: { source: "screen" } });
-    producersRef.current.set("screen", producer);
-    localTracksRef.current.set("screen", track);
+    await room.localParticipant.setScreenShareEnabled(!room.localParticipant.isScreenShareEnabled);
     syncLocal();
-  }, [syncLocal]);
+  }, [room, syncLocal]);
 
-  const sendChatMessage = useCallback(async (text: string) => {
-    const message: ChatMessage = {
-      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      peerId: user?.id || "",
-      senderName: user?.name || "You",
-      senderAvatar: user?.avatarUrl || "",
-      text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isSelf: true
-    };
-    setChatMessages((previous) => [...previous, message]);
-    socketRef.current?.send(JSON.stringify({ type: "chat", message }));
-  }, [user]);
+  const sendChatMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const message = {
+        type: "chat",
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        text: trimmed,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      };
+      setChatMessages((previous) => [
+        ...previous,
+        {
+          ...message,
+          peerId: user?.id || "",
+          senderName: user?.name || "You",
+          senderAvatar: user?.avatarUrl || "",
+          isSelf: true
+        }
+      ]);
+      await room.localParticipant.publishData(
+        new TextEncoder().encode(JSON.stringify(message)),
+        { reliable: true }
+      );
+    },
+    [room, user]
+  );
 
-  const broadcastCaption = useCallback(async (speaker: string, text: string) => {
-    socketRef.current?.send(JSON.stringify({
-      type: "caption",
-      message: { senderName: speaker, text }
-    }));
-  }, []);
+  const broadcastCaption = useCallback(
+    async (speaker: string, text: string) => {
+      await room.localParticipant.publishData(
+        new TextEncoder().encode(JSON.stringify({ type: "caption", speaker, text })),
+        { reliable: true }
+      );
+    },
+    [room]
+  );
 
   return {
     myPeerId: user?.id || "",
@@ -380,10 +327,10 @@ export function useAuraWeave({
     toggleScreenShare,
     toggleRaiseHand: () => {},
     promoteToStage: () => {},
-    demoteFromStage: () => {},
-    setOnCaptionReceived: (callback: (speaker: string, text: string) => void) => {
-      onCaptionReceivedRef.current = callback;
-    },
-    broadcastCaption
+    demoteToAudience: () => {},
+    broadcastCaption,
+    setOnCaptionReceived: (fn: (speaker: string, text: string) => void) => {
+      onCaptionReceivedRef.current = fn;
+    }
   };
 }
