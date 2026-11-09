@@ -276,6 +276,10 @@ export function useAuraWeave({
   }, [roomName, user?.id, isHost]);
 
   const addPeerState = (peer: AuraWeavePeer) => {
+    // Never add ourselves as a remote peer
+    if (peer.peerId === myPeerIdRef.current || (user?.id && peer.userId === user.id)) {
+      return;
+    }
     setPeers((prev) => {
       const next = new Map(prev);
       const existing = next.get(peer.peerId);
@@ -298,7 +302,8 @@ export function useAuraWeave({
   };
 
   // 3. WebRTC PeerConnection Management
-  const createPeerConnection = (targetPeerId: string, isInitiator: boolean) => {
+  const createPeerConnection = (targetPeerId: string, isInitiator: boolean): RTCPeerConnection | null => {
+    if (!targetPeerId || targetPeerId === myPeerIdRef.current) return null;
     if (peerConnectionsRef.current.has(targetPeerId)) {
       return peerConnectionsRef.current.get(targetPeerId)!;
     }
@@ -364,9 +369,12 @@ export function useAuraWeave({
   };
 
   const handleRemoteSignal = async (senderPeerId: string, signal: any) => {
+    if (!senderPeerId || senderPeerId === myPeerIdRef.current) return;
     let pc = peerConnectionsRef.current.get(senderPeerId);
     if (!pc) {
-      pc = createPeerConnection(senderPeerId, false);
+      const created = createPeerConnection(senderPeerId, false);
+      if (!created) return;
+      pc = created;
     }
 
     try {
@@ -582,7 +590,12 @@ export function useAuraWeave({
     role,
     isStageMember,
     localStream,
-    peers: Array.from(peers.values()).filter((p) => p.role === "host" || p.role === "presenter"),
+    peers: Array.from(peers.values()).filter(
+      (p) =>
+        (p.role === "host" || p.role === "presenter") &&
+        p.peerId !== myPeerIdRef.current &&
+        (!user?.id || p.userId !== user.id)
+    ),
     audienceCount,
     totalParticipants,
     handsRaised,

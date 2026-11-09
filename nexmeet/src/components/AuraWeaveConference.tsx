@@ -681,7 +681,7 @@ export default function AuraWeaveConference({
               {aiLoading ? (
                 <div className="ai-loading-state">
                   <LoaderCircle className="spin" size={28} />
-                  <p>Synthesizing 1,000-participant meeting minutes with Llama 3.3…</p>
+                  <p>Synthesizing humanized meeting minutes with Groq AI…</p>
                 </div>
               ) : aiError ? (
                 <div className="notice error">{aiError}</div>

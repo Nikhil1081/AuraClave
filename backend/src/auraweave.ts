@@ -69,13 +69,13 @@ export class AuraWeaveSignaler {
 
               room.set(currentPeerId, participant);
 
-              // Extract stage members (host + presenters) and audience stats
+              // Extract stage members (excluding the current joining peer)
               const stageMembers: any[] = [];
               const handsRaised: any[] = [];
               let audienceCount = 0;
 
               room.forEach((p) => {
-                if (p.role === "host" || p.role === "presenter") {
+                if (p.peerId !== currentPeerId && (p.role === "host" || p.role === "presenter")) {
                   stageMembers.push({
                     peerId: p.peerId,
                     userId: p.userId,
@@ -86,11 +86,11 @@ export class AuraWeaveSignaler {
                     isVideoMuted: p.isVideoMuted,
                     isScreenSharing: p.isScreenSharing
                   });
-                } else {
+                } else if (p.peerId !== currentPeerId && p.role === "audience") {
                   audienceCount++;
                 }
 
-                if (p.raisedHand) {
+                if (p.peerId !== currentPeerId && p.raisedHand) {
                   handsRaised.push({
                     peerId: p.peerId,
                     userId: p.userId,

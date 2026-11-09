@@ -195,8 +195,8 @@ app.post("/api/ai", async (req: Request, res: Response) => {
     }
 
     const prompt = task === "action-items"
-      ? "Extract clear action items from these meeting notes. Include owner and deadline only if stated. Do not invent details."
-      : "Create concise, structured meeting minutes with: Summary, Key decisions, Action items, and Open questions. Do not invent details.";
+      ? "Extract clear, humanized action items from these meeting notes. Highlight owners and next steps naturally. Avoid robotic phrasing."
+      : "Write humanized, professional, and well-structured meeting notes. Use friendly yet executive language with clean bullet points. Include:\n- ✨ Executive Overview\n- 💡 Key Takeaways & Highlights\n- 🚀 Next Steps & Action Items\nMake it feel like a smart Chief of Staff wrote it, not a machine.";
 
     // Active high-speed Groq models
     const primaryModel =
@@ -210,10 +210,14 @@ app.post("/api/ai", async (req: Request, res: Response) => {
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: modelName,
-          temperature: 0.3,
+          temperature: 0.5,
           messages: [
-            { role: "system", content: "You are a precise meeting assistant. Only use information in the supplied notes." },
-            { role: "user", content: `${prompt}\n\nMeeting notes:\n${text}` }
+            {
+              role: "system",
+              content:
+                "You are an empathetic, articulate executive assistant. You write clean, natural, humanized meeting minutes with clear structure and warmth. Avoid stiff or robotic phrases like 'None documented' or 'As an AI'. If the notes are brief or from a solo session, provide a warm, encouraging summary."
+            },
+            { role: "user", content: `${prompt}\n\nMeeting conversation:\n${text}` }
           ]
         })
       });
