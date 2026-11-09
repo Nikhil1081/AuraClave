@@ -20,7 +20,7 @@ function getApiBase(): string {
 export default function Meeting() {
   const { roomName = "" } = useParams();
   const location = useLocation();
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const isCreatedByMe = Boolean(
     (location.state as any)?.isHost ||
     (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`auraclave_host_${roomName}`) === "true")
@@ -97,7 +97,11 @@ export default function Meeting() {
         const response = await fetch(apiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({ roomName })
+          body: JSON.stringify({
+            roomName,
+            participantName: user?.user_metadata?.full_name,
+            avatarUrl: user?.user_metadata?.avatar_url
+          })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not join this meeting.");

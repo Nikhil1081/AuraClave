@@ -1542,3 +1542,33 @@
   background: rgba(239, 68, 68, 0.4);
   color: #ffffff;
 }
+
+
+/* LiveKit Call Custom Participant DP */
+.lk-participant-tile .lk-participant-placeholder svg {
+  display: none !important;
+}
+.lk-custom-dp {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(139, 92, 246, 0.7);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  animation: fadeIn 0.25s ease-out;
+}
+.lk-custom-dp-fallback {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  font-weight: 800;
+  color: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  animation: fadeIn 0.25s ease-out;
+}

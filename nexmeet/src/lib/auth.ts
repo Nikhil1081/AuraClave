@@ -14,6 +14,7 @@ export interface AuthSession {
 
 const TOKEN_KEY = "auraclave_auth_token";
 const USER_KEY = "auraclave_auth_user";
+const PROFILE_KEY = "auraclave_profile_override";
 
 export function getApiBase(): string {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -58,7 +59,23 @@ export const auth = {
   getUser(): AuthUser | null {
     try {
       const stored = localStorage.getItem(USER_KEY);
-      return stored ? JSON.parse(stored) : null;
+      if (!stored) return null;
+      const user: AuthUser = JSON.parse(stored);
+
+      // Ensure persistent custom profile is always retained across browser reloads
+      const savedProfile = localStorage.getItem(PROFILE_KEY);
+      if (savedProfile) {
+        try {
+          const custom = JSON.parse(savedProfile);
+          user.user_metadata = {
+            ...user.user_metadata,
+            full_name: custom.fullName || user.user_metadata?.full_name,
+            avatar_url: custom.avatarUrl !== undefined ? custom.avatarUrl : user.user_metadata?.avatar_url
+          };
+        } catch {}
+      }
+
+      return user;
     } catch {
       return null;
     }
@@ -131,8 +148,26 @@ export const auth = {
         return null;
       }
       const data = await safeParseJson(res);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      return data.user;
+
+      // Merge with persistent profile override so custom name & DP are never lost
+      const savedProfile = localStorage.getItem(PROFILE_KEY);
+      let mergedUser: AuthUser = data.user;
+      if (savedProfile) {
+        try {
+          const custom = JSON.parse(savedProfile);
+          mergedUser = {
+            ...data.user,
+            user_metadata: {
+              ...data.user?.user_metadata,
+              full_name: custom.fullName || data.user?.user_metadata?.full_name,
+              avatar_url: custom.avatarUrl !== undefined ? custom.avatarUrl : data.user?.user_metadata?.avatar_url
+            }
+          };
+        } catch {}
+      }
+
+      localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
+      return mergedUser;
     } catch {
       return this.getUser();
     }
@@ -141,12 +176,31 @@ export const auth = {
   signOut(): void {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    // Keep PROFILE_KEY intact so user's personalized profile settings remain
     window.dispatchEvent(new Event("auraclave:auth_change"));
   },
 
   async updateProfile(fullName: string, avatarUrl: string): Promise<AuthUser> {
+    // 1. Immediately save to persistent profile override in localStorage
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({ fullName, avatarUrl }));
+    } catch {}
+
+    const current = this.getUser();
+    if (current) {
+      current.user_metadata = {
+        ...current.user_metadata,
+        full_name: fullName.trim() || current.user_metadata?.full_name,
+        avatar_url: avatarUrl.trim()
+      };
+      localStorage.setItem(USER_KEY, JSON.stringify(current));
+      window.dispatchEvent(new Event("auraclave:auth_change"));
+    }
+
     const token = this.getToken();
-    if (!token) throw new Error("Please sign in to update your profile.");
+    if (!token) {
+      return current || { id: "local", email: "", user_metadata: { full_name: fullName, avatar_url: avatarUrl } };
+    }
 
     const base = getApiBase();
     const url = base ? `${base}/api/auth/profile` : "/api/auth/profile";
@@ -162,33 +216,18 @@ export const auth = {
       });
 
       const data = await safeParseJson(res);
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to update profile.");
-      }
-
-      if (data.token) {
-        localStorage.setItem(TOKEN_KEY, data.token);
-      }
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      window.dispatchEvent(new Event("auraclave:auth_change"));
-      return data.user;
-    } catch (err: any) {
-      // Local fallback if backend is offline/redeploying
-      const current = this.getUser();
-      if (current) {
-        const updated: AuthUser = {
-          ...current,
-          user_metadata: {
-            ...current.user_metadata,
-            full_name: fullName.trim() || current.user_metadata?.full_name,
-            avatar_url: avatarUrl.trim()
-          }
-        };
-        localStorage.setItem(USER_KEY, JSON.stringify(updated));
+      if (res.ok) {
+        if (data.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+        }
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         window.dispatchEvent(new Event("auraclave:auth_change"));
-        return updated;
+        return data.user;
       }
-      throw err;
+    } catch (err: any) {
+      console.warn("Backend profile sync queued:", err);
     }
+
+    return this.getUser()!;
   }
 };

@@ -216,6 +216,71 @@ export default function MeetingExtensions({
     };
   }, [captionsEnabled, room, user, currentSpeechCode]);
 
+  // 3. Reflect Custom Name & DP directly onto LiveKit Participant Tiles inside the call
+  useEffect(() => {
+    if (!room) return;
+
+    const avatar = user?.user_metadata?.avatar_url || "";
+    const name = user?.user_metadata?.full_name || user?.email || "";
+
+    try {
+      if ((room.localParticipant as any).setName && name) {
+        (room.localParticipant as any).setName(name);
+      }
+      if ((room.localParticipant as any).setMetadata) {
+        (room.localParticipant as any).setMetadata(
+          JSON.stringify({ avatar_url: avatar, full_name: name })
+        );
+      }
+    } catch {}
+
+    function updateTiles() {
+      const tiles = document.querySelectorAll(".lk-participant-tile");
+      tiles.forEach((tile) => {
+        const placeholder = tile.querySelector(".lk-participant-placeholder");
+        if (!placeholder) return;
+
+        const isLocal = tile.getAttribute("data-lk-local-participant") === "true";
+        let curAvatar = "";
+        let curName = "";
+
+        if (isLocal) {
+          curAvatar = user?.user_metadata?.avatar_url || "";
+          curName = user?.user_metadata?.full_name || user?.email || "You";
+        } else {
+          const identity = tile.getAttribute("data-lk-participant-identity") || "";
+          const remote = Array.from(room.remoteParticipants.values()).find((p) => p.identity === identity);
+          if (remote?.metadata) {
+            try {
+              const meta = JSON.parse(remote.metadata);
+              curAvatar = meta.avatar_url || "";
+              curName = meta.full_name || remote.name || "";
+            } catch {}
+          }
+          if (!curName && remote?.name) curName = remote.name;
+        }
+
+        const initial = (curName.trim() || "U")[0].toUpperCase();
+        const existingImg = placeholder.querySelector(".lk-custom-dp") as HTMLImageElement | null;
+        const existingFallback = placeholder.querySelector(".lk-custom-dp-fallback");
+
+        if (curAvatar) {
+          if (!existingImg || existingImg.src !== curAvatar) {
+            placeholder.innerHTML = `<img src="${curAvatar}" alt="${curName}" class="lk-custom-dp" />`;
+          }
+        } else {
+          if (!existingFallback || existingFallback.textContent !== initial) {
+            placeholder.innerHTML = `<div class="lk-custom-dp-fallback">${initial}</div>`;
+          }
+        }
+      });
+    }
+
+    updateTiles();
+    const interval = setInterval(updateTiles, 1000);
+    return () => clearInterval(interval);
+  }, [room, user]);
+
   // 3. Meeting Recording (Zero-Prompt Meeting Recording + Audio/Screen)
   // Smart Meeting Recording: Automatically grabs incoming screen share or room video + audio with ZERO PROMPTS!
   const startMeetingRecording = async (forceAudioOnly = false) => {
