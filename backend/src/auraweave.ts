@@ -262,6 +262,28 @@ export class AuraWeaveSignaler {
               break;
             }
 
+            case "chat-message": {
+              // Broadcast real-time text chat messages across all participants
+              if (!currentRoomName) return;
+              const { text, senderName, senderAvatar, id } = data || {};
+              if (!text || !text.trim()) return;
+
+              const chatPayload = {
+                id: id || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                peerId: currentPeerId,
+                senderName: senderName || "Guest",
+                senderAvatar: senderAvatar || "",
+                text: text.trim().slice(0, 1000),
+                time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              };
+
+              this.broadcast(currentRoomName, currentPeerId, {
+                type: "chat-message",
+                data: chatPayload
+              });
+              break;
+            }
+
             case "ping": {
               this.send(ws, { type: "pong", data: { time: Date.now() } });
               break;

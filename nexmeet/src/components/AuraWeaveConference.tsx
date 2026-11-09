@@ -21,7 +21,9 @@ import {
   Radio,
   ArrowUpRight,
   ArrowDownLeft,
-  UserCheck
+  UserCheck,
+  MessageSquare,
+  Send
 } from "lucide-react";
 import Brand from "./Brand";
 import ShareMeetingModal from "./ShareMeetingModal";
@@ -47,6 +49,12 @@ export default function AuraWeaveConference({
   const [quickCopied, setQuickCopied] = useState(false);
   const [showHandsModal, setShowHandsModal] = useState(false);
 
+  // In-Meeting Real-Time Chat State
+  const [showChat, setShowChat] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [chatInput, setChatInput] = useState("");
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
   // AuraWeave 1,000-Participant Engine Hook
   const {
     myPeerId,
@@ -61,6 +69,8 @@ export default function AuraWeaveConference({
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
+    chatMessages,
+    sendChatMessage,
     connected,
     error: rtcError,
     toggleAudio,
@@ -82,6 +92,39 @@ export default function AuraWeaveConference({
       : null,
     isHost
   });
+
+  // Global Audio Autoplay Policy Unblocker
+  useEffect(() => {
+    const unlockAudio = () => {
+      document.querySelectorAll("audio").forEach((el) => {
+        el.play().catch(() => {});
+      });
+    };
+    window.addEventListener("click", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+    return () => {
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+  }, []);
+
+  // Track chat messages & auto-scroll
+  useEffect(() => {
+    if (chatMessages.length > 0) {
+      const last = chatMessages[chatMessages.length - 1];
+      if (!showChat && !last.isSelf) {
+        setUnreadChatCount((prev) => prev + 1);
+      }
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, showChat]);
+
+  const handleSendChat = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!chatInput.trim()) return;
+    sendChatMessage(chatInput.trim());
+    setChatInput("");
+  };
 
   // Local Video Ref
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -401,103 +444,177 @@ export default function AuraWeaveConference({
       </header>
 
       {/* Main Content Area */}
-      <div className="meeting-content">
-        {/* Audience Status Notification Banner */}
-        {!isStageMember && (
-          <div className="audience-status-banner">
-            <div className="flex items-center gap-2">
-              <span className="live-dot" />
-              <span>
-                You are currently in the <strong>Audience</strong> (watching in HD). Click <strong>Raise Hand</strong> below to speak on stage.
-              </span>
-            </div>
-            {myHandRaised && (
-              <span className="hand-raised-badge">
-                <Hand size={13} /> Hand Raised — Waiting for Host
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Stage Video Grid */}
-        <div className={`auraweave-grid ${gridClass}`}>
-          {/* Local Tile (if on Stage) */}
-          {isStageMember && (
-            <div className="auraweave-tile local-tile">
-              <video
-                ref={(el) => {
-                  if (el) {
-                    if (el.srcObject !== localStream) {
-                      el.srcObject = localStream;
-                    }
-                    if (localStream && !isVideoMuted) {
-                      el.play().catch(() => {});
-                    }
-                  }
-                }}
-                autoPlay
-                playsInline
-                muted
-                style={{ display: isVideoMuted ? "none" : "block" }}
-                className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
-              />
-
-              {isVideoMuted && (
-                <div className="tile-placeholder">
-                  {myAvatar ? (
-                    <img src={myAvatar} alt={myName} className="tile-avatar-img" />
-                  ) : (
-                    <div className="tile-avatar-fallback">{myInitial}</div>
-                  )}
-                </div>
-              )}
-
-              <div className="tile-meta">
-                <span className="tile-name">{myName} (You • {role === "host" ? "Host" : "Presenter"})</span>
-                {isAudioMuted ? (
-                  <MicOff size={14} className="tile-muted-icon" />
-                ) : (
-                  <Mic size={14} className="tile-mic-icon" />
-                )}
+      <div className={`meeting-content ${showChat ? "with-chat" : ""}`}>
+        <div className="meeting-stage-area">
+          {/* Audience Status Notification Banner */}
+          {!isStageMember && (
+            <div className="audience-status-banner">
+              <div className="flex items-center gap-2">
+                <span className="live-dot" />
+                <span>
+                  You are currently in the <strong>Audience</strong> (watching in HD). Click <strong>Raise Hand</strong> below to speak on stage.
+                </span>
               </div>
-
-              {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
+              {myHandRaised && (
+                <span className="hand-raised-badge">
+                  <Hand size={13} /> Hand Raised — Waiting for Host
+                </span>
+              )}
             </div>
           )}
 
-          {/* Remote Stage Peers (strictly excluding self) */}
-          {peers
-            .filter(
-              (peer) =>
-                peer.peerId !== myPeerId &&
-                (!user?.id || peer.userId !== user.id) &&
-                (!myName || peer.name !== myName)
-            )
-            .map((peer) => (
-              <RemoteStagePeerTile
-                key={peer.peerId}
-                peer={peer}
-                isHost={role === "host"}
-                onDemote={() => demoteToAudience(peer.peerId)}
-              />
-            ))}
+          {/* Stage Video Grid */}
+          <div className={`auraweave-grid ${gridClass}`}>
+            {/* Local Tile (if on Stage) */}
+            {isStageMember && (
+              <div className="auraweave-tile local-tile">
+                <video
+                  ref={(el) => {
+                    if (el) {
+                      if (el.srcObject !== localStream) {
+                        el.srcObject = localStream;
+                      }
+                      if (localStream && !isVideoMuted) {
+                        el.play().catch(() => {});
+                      }
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{ display: isVideoMuted ? "none" : "block" }}
+                  className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
+                />
 
-          {/* Empty Stage Placeholder if Audience with no Active Presenter */}
-          {!isStageMember && peers.length === 0 && (
-            <div className="empty-stage-box">
-              <Radio size={36} className="text-violet-400 mb-2" />
-              <h3>The Stage is Ready</h3>
-              <p className="text-slate-400 text-sm">Host and presenters will appear here when they share video or screen.</p>
+                {isVideoMuted && (
+                  <div className="tile-placeholder">
+                    {myAvatar ? (
+                      <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+                    ) : (
+                      <div className="tile-avatar-fallback">{myInitial}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="tile-meta">
+                  <span className="tile-name">{myName} (You • {role === "host" ? "Host" : "Presenter"})</span>
+                  {isAudioMuted ? (
+                    <MicOff size={14} className="tile-muted-icon" />
+                  ) : (
+                    <Mic size={14} className="tile-mic-icon" />
+                  )}
+                </div>
+
+                {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
+              </div>
+            )}
+
+            {/* Remote Stage Peers (strictly excluding self) */}
+            {peers
+              .filter(
+                (peer) =>
+                  peer.peerId !== myPeerId &&
+                  (!user?.id || peer.userId !== user.id) &&
+                  (!myName || peer.name !== myName)
+              )
+              .map((peer) => (
+                <RemoteStagePeerTile
+                  key={peer.peerId}
+                  peer={peer}
+                  isHost={role === "host"}
+                  onDemote={() => demoteToAudience(peer.peerId)}
+                />
+              ))}
+
+            {/* Empty Stage Placeholder if Audience with no Active Presenter */}
+            {!isStageMember && peers.length === 0 && (
+              <div className="empty-stage-box">
+                <Radio size={36} className="text-violet-400 mb-2" />
+                <h3>The Stage is Ready</h3>
+                <p className="text-slate-400 text-sm">Host and presenters will appear here when they share video or screen.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Live Closed Captions */}
+          {captionsEnabled && currentCaption && (
+            <div className="live-caption-pill">
+              <span className="caption-speaker">{currentCaption.speaker}:</span>
+              <span className="caption-text">{currentCaption.text}</span>
             </div>
           )}
         </div>
 
-        {/* Live Closed Captions */}
-        {captionsEnabled && currentCaption && (
-          <div className="live-caption-pill">
-            <span className="caption-speaker">{currentCaption.speaker}:</span>
-            <span className="caption-text">{currentCaption.text}</span>
-          </div>
+        {/* In-Meeting Real-Time Chat Drawer */}
+        {showChat && (
+          <aside className="meeting-chat-drawer">
+            <div className="chat-drawer-header">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={16} className="text-violet-400" />
+                <h3>Meeting Chat</h3>
+              </div>
+              <button
+                type="button"
+                className="icon-close"
+                onClick={() => setShowChat(false)}
+                title="Close chat panel"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="chat-drawer-notice">
+              Messages are visible to everyone currently in this meeting.
+            </div>
+
+            <div className="chat-messages-scroll">
+              {chatMessages.length === 0 ? (
+                <div className="chat-empty-state">
+                  <MessageSquare size={30} className="text-slate-600 mb-2" />
+                  <p>No messages yet</p>
+                  <span>Say hello to everyone in the room!</span>
+                </div>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`chat-bubble-wrap ${msg.isSelf ? "self" : "remote"}`}
+                  >
+                    {!msg.isSelf && (
+                      <div className="chat-sender-meta">
+                        <span className="chat-sender-name">{msg.senderName}</span>
+                        <span className="chat-sender-time">{msg.time}</span>
+                      </div>
+                    )}
+                    <div className="chat-bubble">
+                      <span className="chat-text">{msg.text}</span>
+                      {msg.isSelf && <span className="chat-self-time">{msg.time}</span>}
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            <form className="chat-drawer-input-form" onSubmit={handleSendChat}>
+              <input
+                type="text"
+                placeholder="Send a message to everyone…"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                maxLength={500}
+                className="chat-text-input"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim()}
+                className="chat-send-btn"
+                title="Send message"
+              >
+                <Send size={15} />
+              </button>
+            </form>
+          </aside>
         )}
       </div>
 
@@ -575,6 +692,22 @@ export default function AuraWeaveConference({
             >
               {isRecording ? <Square size={16} /> : <CircleDot size={18} />}
               <span>{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`control-btn ${showChat ? "accent" : ""}`}
+              onClick={() => {
+                setShowChat(!showChat);
+                setUnreadChatCount(0);
+              }}
+              title="Meeting Chat"
+            >
+              <MessageSquare size={18} />
+              <span>Chat</span>
+              {unreadChatCount > 0 && (
+                <span className="chat-unread-badge">{unreadChatCount}</span>
+              )}
             </button>
 
             <button

@@ -22,12 +22,38 @@ export interface HandRaisedUser {
   avatarUrl: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  peerId: string;
+  senderName: string;
+  senderAvatar: string;
+  text: string;
+  time: string;
+  isSelf: boolean;
+}
+
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
   { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun3.l.google.com:19302" },
-  { urls: "stun:stun4.l.google.com:19302" }
+  { urls: "stun:stun4.l.google.com:19302" },
+  { urls: "stun:stun.relay.metered.ca:80" },
+  {
+    urls: "turn:global.relay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:global.relay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:global.relay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
 ];
 
 function getAuraWeaveWsUrl(): string {
@@ -62,6 +88,7 @@ export function useAuraWeave({
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -283,6 +310,22 @@ export function useAuraWeave({
             break;
           }
 
+          case "chat-message": {
+            setChatMessages((prev) => [
+              ...prev,
+              {
+                id: data.id || `${Date.now()}_${Math.random()}`,
+                peerId: data.peerId,
+                senderName: data.senderName,
+                senderAvatar: data.senderAvatar,
+                text: data.text,
+                time: data.time || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                isSelf: false
+              }
+            ]);
+            break;
+          }
+
           case "peer-left": {
             removePeer(data.peerId);
             break;
@@ -371,19 +414,29 @@ export function useAuraWeave({
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === "failed" && isInitiator) {
+        try {
+          pc.restartIce();
+        } catch {}
+      }
+    };
+
     pc.ontrack = (event) => {
       setPeers((prev) => {
         const next = new Map(prev);
         const p = next.get(targetPeerId);
         if (p) {
-          let stream = p.stream;
-          if (!stream) {
-            stream = new MediaStream();
-          }
-          if (!stream.getTracks().some((t) => t.id === event.track.id)) {
-            stream.addTrack(event.track);
-          }
-          next.set(targetPeerId, { ...p, stream });
+          const existingTracks = p.stream ? p.stream.getTracks() : [];
+          const incomingTracks = event.streams[0] ? event.streams[0].getTracks() : [event.track];
+          const allTracksMap = new Map<string, MediaStreamTrack>();
+          existingTracks.forEach((t) => allTracksMap.set(t.id, t));
+          incomingTracks.forEach((t) => allTracksMap.set(t.id, t));
+          allTracksMap.set(event.track.id, event.track);
+
+          // Brand new MediaStream reference guarantees React re-render & triggers audio/video ref bindings immediately
+          const freshStream = new MediaStream(Array.from(allTracksMap.values()));
+          next.set(targetPeerId, { ...p, stream: freshStream });
         }
         return next;
       });
@@ -718,6 +771,43 @@ export function useAuraWeave({
     onCaptionReceivedRef.current = fn;
   };
 
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || wsRef.current?.readyState !== WebSocket.OPEN) return;
+
+      const myName = user?.name || "You";
+      const myAvatar = user?.avatarUrl || "";
+      const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      const msgObj: ChatMessage = {
+        id: msgId,
+        peerId: myPeerIdRef.current,
+        senderName: myName,
+        senderAvatar: myAvatar,
+        text: trimmed,
+        time: timeStr,
+        isSelf: true
+      };
+
+      setChatMessages((prev) => [...prev, msgObj]);
+
+      wsRef.current.send(
+        JSON.stringify({
+          type: "chat-message",
+          data: {
+            id: msgId,
+            text: trimmed,
+            senderName: myName,
+            senderAvatar: myAvatar
+          }
+        })
+      );
+    },
+    [user?.name, user?.avatarUrl]
+  );
+
   return {
     myPeerId: myPeerIdRef.current,
     role,
@@ -737,6 +827,8 @@ export function useAuraWeave({
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
+    chatMessages,
+    sendChatMessage,
     connected,
     error,
     toggleAudio,
