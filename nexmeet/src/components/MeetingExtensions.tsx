@@ -46,6 +46,18 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
   const timerIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const userMicStreamRef = useRef<MediaStream | null>(null);
+  const recordMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close record dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (recordMenuRef.current && !recordMenuRef.current.contains(event.target as Node)) {
+        setShowRecordMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // AI Summary Modal state
   const [showAiModal, setShowAiModal] = useState(false);
@@ -448,7 +460,7 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
         <LanguageSelector compact />
 
         {/* Recording Menu & Button */}
-        <div className="record-container">
+        <div className="record-container" ref={recordMenuRef}>
           {isRecording ? (
             <button
               className="action-pill recording-active"

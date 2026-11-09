@@ -738,31 +738,20 @@
 }
 .record-menu-popover {
   position: absolute;
-  bottom: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.96);
+  top: calc(100% + 8px);
+  right: 0;
+  background: #111724;
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 14px;
   padding: 10px;
-  min-width: 290px;
+  width: 310px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  z-index: 9999;
-  animation: popoverFadeIn 0.18s ease-out;
-}
-@keyframes popoverFadeIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 120;
+  animation: fadeIn 0.15s ease-out;
 }
 .record-menu-header {
   font-size: 11px;
