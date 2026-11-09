@@ -7,6 +7,7 @@ type AuthValue = {
   loading: boolean;
   configured: boolean;
   signOut: () => Promise<void>;
+  updateProfile: (fullName: string, avatarUrl: string) => Promise<AuthUser>;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -56,6 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       auth.signOut();
       setUser(null);
       setSession(null);
+    },
+    updateProfile: async (fullName: string, avatarUrl: string) => {
+      const updated = await auth.updateProfile(fullName, avatarUrl);
+      setUser(updated);
+      return updated;
     }
   };
 

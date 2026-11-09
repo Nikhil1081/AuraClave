@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { AccessToken } from "livekit-server-sdk";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
-import { createUser, findUserByEmail, verifyPassword } from "./db.js";
+import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
 
 dotenv.config();
 
@@ -41,7 +41,10 @@ app.post("/api/auth/signup", async (req: Request, res: Response) => {
       user: {
         id: user.id,
         email: user.email,
-        user_metadata: { full_name: user.fullName }
+        user_metadata: {
+          full_name: user.fullName,
+          avatar_url: user.avatarUrl || ""
+        }
       },
       token
     });
@@ -75,12 +78,44 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
       user: {
         id: user.id,
         email: user.email,
-        user_metadata: { full_name: user.fullName }
+        user_metadata: {
+          full_name: user.fullName,
+          avatar_url: user.avatarUrl || ""
+        }
       },
       token
     });
   } catch (err: any) {
     return res.status(400).json({ error: err?.message || "Login failed." });
+  }
+});
+
+// Authentication: Update Profile (Username & DP)
+app.patch("/api/auth/profile", async (req: Request, res: Response) => {
+  try {
+    const authUser = await getAuthenticatedUser(req);
+    const { fullName, avatarUrl } = req.body ?? {};
+
+    const updatedUser = await updateUserProfile(authUser.id, {
+      fullName,
+      avatarUrl
+    });
+
+    const token = generateToken(updatedUser);
+
+    return res.status(200).json({
+      user: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        user_metadata: {
+          full_name: updatedUser.fullName,
+          avatar_url: updatedUser.avatarUrl || ""
+        }
+      },
+      token
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || "Failed to update profile." });
   }
 });
 
@@ -112,6 +147,9 @@ app.post("/api/token", async (req: Request, res: Response) => {
     const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
       identity: user.id,
       name: user.user_metadata?.full_name || user.email || "AuraClave guest",
+      metadata: JSON.stringify({
+        avatar_url: user.user_metadata?.avatar_url || ""
+      }),
       ttl: "24h"
     });
 

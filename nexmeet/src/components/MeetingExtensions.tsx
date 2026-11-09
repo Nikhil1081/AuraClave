@@ -12,7 +12,8 @@ import {
   Download,
   LoaderCircle,
   Mic,
-  Monitor
+  Monitor,
+  Share2
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage, SUPPORTED_LANGUAGES } from "../contexts/LanguageContext";
@@ -24,7 +25,13 @@ interface CaptionItem {
   time: string;
 }
 
-export default function MeetingExtensions({ roomName }: { roomName: string }) {
+export default function MeetingExtensions({
+  roomName,
+  onOpenShare
+}: {
+  roomName: string;
+  onOpenShare?: () => void;
+}) {
   const room = useRoomContext();
   const { session, user } = useAuth();
   const { language, t, currentSpeechCode } = useLanguage();
@@ -536,6 +543,18 @@ export default function MeetingExtensions({ roomName }: { roomName: string }) {
           <Sparkles size={15} />
           <span>{t("meeting_ai_notes")}</span>
         </button>
+
+        {/* Share Meeting Link Button */}
+        {onOpenShare && (
+          <button
+            className="action-pill share-pill"
+            onClick={onOpenShare}
+            title="Share meeting invite link"
+          >
+            <Share2 size={15} />
+            <span>Share</span>
+          </button>
+        )}
       </div>
 
       {/* Subtitles Overlay Banner (Bottom Center) */}

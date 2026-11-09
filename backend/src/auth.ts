@@ -9,6 +9,7 @@ export interface AuthenticatedUser {
   email: string;
   user_metadata: {
     full_name: string;
+    avatar_url?: string;
   };
 }
 
@@ -17,7 +18,8 @@ export function generateToken(user: UserRecord): string {
     {
       id: user.id,
       email: user.email,
-      fullName: user.fullName
+      fullName: user.fullName,
+      avatarUrl: user.avatarUrl || ""
     },
     JWT_SECRET,
     { expiresIn: "30d" }
@@ -40,13 +42,28 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
       id: string;
       email: string;
       fullName?: string;
+      avatarUrl?: string;
     };
+
+    // If available in DB, retrieve freshest user data
+    const user = await findUserById(payload.id);
+    if (user) {
+      return {
+        id: user.id,
+        email: user.email,
+        user_metadata: {
+          full_name: user.fullName,
+          avatar_url: user.avatarUrl || ""
+        }
+      };
+    }
 
     return {
       id: payload.id,
       email: payload.email,
       user_metadata: {
-        full_name: payload.fullName || payload.email.split("@")[0]
+        full_name: payload.fullName || payload.email.split("@")[0],
+        avatar_url: payload.avatarUrl || ""
       }
     };
   } catch (err: any) {

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, CalendarDays, Copy, LogOut, Plus, Video, Users, Sparkles } from "lucide-react";
+import { ArrowRight, CalendarDays, Copy, LogOut, Plus, Video, Users, Sparkles, Settings, Camera } from "lucide-react";
 import Brand from "../components/Brand";
 import LanguageSelector from "../components/LanguageSelector";
+import ProfileModal from "../components/ProfileModal";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 
@@ -15,8 +16,12 @@ export default function Dashboard() {
   const { t } = useLanguage();
   const [roomCode, setRoomCode] = useState("");
   const [_copied, setCopied] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const navigate = useNavigate();
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
+  const fullName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
+  const firstName = fullName.split(" ")[0] || "there";
+  const avatarUrl = user?.user_metadata?.avatar_url || "";
+  const initial = firstName[0]?.toUpperCase() || "U";
 
   function createMeeting() {
     navigate(`/meeting/${makeRoom()}`);
@@ -37,13 +42,25 @@ export default function Dashboard() {
         <div className="side-item active">
           <Video size={18} /> Meetings
         </div>
+        <button
+          className="side-item"
+          onClick={() => setShowProfileModal(true)}
+          style={{ width: "100%", textAlign: "left", background: "none", border: "none" }}
+        >
+          <Settings size={18} /> Profile & DP
+        </button>
         <div className="sidebar-bottom">
-          <div className="profile-mini">
-            <div className="profile-avatar">{firstName[0]?.toUpperCase()}</div>
-            <div>
-              <b>{firstName}</b>
+          <div className="profile-mini cursor-pointer" onClick={() => setShowProfileModal(true)} title="Edit Profile & DP">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={fullName} className="profile-avatar-img" />
+            ) : (
+              <div className="profile-avatar">{initial}</div>
+            )}
+            <div className="profile-mini-info">
+              <b>{fullName}</b>
               <small>{user?.email}</small>
             </div>
+            <Camera size={14} className="profile-mini-edit" />
           </div>
           <button className="side-item logout" onClick={signOut}>
             <LogOut size={17} /> {t("dash_signout")}
@@ -59,7 +76,17 @@ export default function Dashboard() {
             <span className="online-indicator">
               <i /> Online
             </span>
-            <div className="profile-avatar">{firstName[0]?.toUpperCase()}</div>
+            <div
+              className="profile-avatar-btn cursor-pointer"
+              onClick={() => setShowProfileModal(true)}
+              title="Edit Profile & DP"
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={fullName} className="profile-avatar-img" />
+              ) : (
+                <div className="profile-avatar">{initial}</div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -155,6 +182,11 @@ export default function Dashboard() {
           </div>
         </section>
       </main>
+
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
     </div>
   );
 }

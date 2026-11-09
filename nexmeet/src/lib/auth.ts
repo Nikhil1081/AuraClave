@@ -3,6 +3,7 @@ export interface AuthUser {
   email: string;
   user_metadata?: {
     full_name?: string;
+    avatar_url?: string;
   };
 }
 
@@ -141,5 +142,53 @@ export const auth = {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     window.dispatchEvent(new Event("auraclave:auth_change"));
+  },
+
+  async updateProfile(fullName: string, avatarUrl: string): Promise<AuthUser> {
+    const token = this.getToken();
+    if (!token) throw new Error("Please sign in to update your profile.");
+
+    const base = getApiBase();
+    const url = base ? `${base}/api/auth/profile` : "/api/auth/profile";
+
+    try {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ fullName, avatarUrl })
+      });
+
+      const data = await safeParseJson(res);
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to update profile.");
+      }
+
+      if (data.token) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+      }
+      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      window.dispatchEvent(new Event("auraclave:auth_change"));
+      return data.user;
+    } catch (err: any) {
+      // Local fallback if backend is offline/redeploying
+      const current = this.getUser();
+      if (current) {
+        const updated: AuthUser = {
+          ...current,
+          user_metadata: {
+            ...current.user_metadata,
+            full_name: fullName.trim() || current.user_metadata?.full_name,
+            avatar_url: avatarUrl.trim()
+          }
+        };
+        localStorage.setItem(USER_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event("auraclave:auth_change"));
+        return updated;
+      }
+      throw err;
+    }
   }
 };

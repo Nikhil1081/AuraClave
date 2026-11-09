@@ -12,6 +12,7 @@ export interface UserRecord {
   email: string;
   passwordHash: string;
   fullName: string;
+  avatarUrl?: string;
   createdAt: string;
 }
 
@@ -63,7 +64,12 @@ export async function findUserById(id: string): Promise<UserRecord | null> {
   return null;
 }
 
-export async function createUser(email: string, password: string, fullName: string): Promise<UserRecord> {
+export async function createUser(
+  email: string,
+  password: string,
+  fullName: string,
+  avatarUrl?: string
+): Promise<UserRecord> {
   const cache = await ensureDb();
   const normalized = email.trim().toLowerCase();
 
@@ -79,12 +85,33 @@ export async function createUser(email: string, password: string, fullName: stri
     email: normalized,
     passwordHash,
     fullName: fullName.trim() || normalized.split("@")[0],
+    avatarUrl: avatarUrl || "",
     createdAt: new Date().toISOString()
   };
 
   cache.set(normalized, user);
   await persist();
 
+  return user;
+}
+
+export async function updateUserProfile(
+  id: string,
+  updates: { fullName?: string; avatarUrl?: string }
+): Promise<UserRecord> {
+  const cache = await ensureDb();
+  const user = await findUserById(id);
+  if (!user) throw new Error("User not found.");
+
+  if (typeof updates.fullName === "string" && updates.fullName.trim()) {
+    user.fullName = updates.fullName.trim();
+  }
+  if (typeof updates.avatarUrl === "string") {
+    user.avatarUrl = updates.avatarUrl.trim();
+  }
+
+  cache.set(user.email.toLowerCase(), user);
+  await persist();
   return user;
 }
 

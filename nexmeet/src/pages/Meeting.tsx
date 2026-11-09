@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from "@livekit/components-react";
-import { ArrowLeft, LoaderCircle, Video } from "lucide-react";
+import { LoaderCircle, Share2, Check, Copy } from "lucide-react";
 import Brand from "../components/Brand";
 import MeetingExtensions from "../components/MeetingExtensions";
+import ShareMeetingModal from "../components/ShareMeetingModal";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function Meeting() {
@@ -13,6 +14,8 @@ export default function Meeting() {
   const [serverUrl, setServerUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [quickCopied, setQuickCopied] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -36,8 +39,64 @@ export default function Meeting() {
     return () => { active = false; };
   }, [roomName, session?.access_token]);
 
+  const handleQuickCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(`${window.location.origin}/meeting/${roomName}`);
+    setQuickCopied(true);
+    setTimeout(() => setQuickCopied(false), 2000);
+  };
+
   if (loading) return <div className="loading-screen"><LoaderCircle className="spin"/> Preparing your meeting…</div>;
   if (error) return <div className="center-page"><div className="setup-card"><Brand/><h2>Unable to join</h2><p className="muted">{error}</p><Link className="button primary full" to="/dashboard">Back to dashboard</Link></div></div>;
 
-  return <div className="meeting-page"><header className="meeting-header"><Link to="/dashboard" className="meeting-brand"><Brand small/><span className="meeting-divider"/> <span className="meeting-room-label">Meeting room</span></Link><div className="meeting-room-id"><span className="status-dot"/> {roomName}</div></header><div className="meeting-content"><LiveKitRoom video audio token={token} serverUrl={serverUrl} connect onDisconnected={()=>{}} data-lk-theme="default" className="livekit-room"><VideoConference/><RoomAudioRenderer/><MeetingExtensions roomName={roomName} /></LiveKitRoom></div></div>;
+  return (
+    <div className="meeting-page">
+      <header className="meeting-header">
+        <Link to="/dashboard" className="meeting-brand">
+          <Brand small/>
+          <span className="meeting-divider"/>
+          <span className="meeting-room-label">Meeting room</span>
+        </Link>
+        <div className="meeting-header-actions">
+          <div className="meeting-room-id">
+            <span className="status-dot"/> {roomName}
+          </div>
+          <button
+            className={`meeting-share-pill ${quickCopied ? "copied" : ""}`}
+            onClick={() => setShowShareModal(true)}
+            title="Share meeting link"
+          >
+            <Share2 size={14} />
+            <span>{quickCopied ? "Link Copied!" : "Share Link"}</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="meeting-content">
+        <LiveKitRoom
+          video
+          audio
+          token={token}
+          serverUrl={serverUrl}
+          connect
+          onDisconnected={()=>{}}
+          data-lk-theme="default"
+          className="livekit-room"
+        >
+          <VideoConference />
+          <RoomAudioRenderer />
+          <MeetingExtensions
+            roomName={roomName}
+            onOpenShare={() => setShowShareModal(true)}
+          />
+        </LiveKitRoom>
+      </div>
+
+      <ShareMeetingModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        roomName={roomName}
+      />
+    </div>
+  );
 }
