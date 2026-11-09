@@ -448,15 +448,20 @@ export function useAuraWeave({
   }, []);
 
   const toggleScreenShare = useCallback(async () => {
-    if (!localStreamRef.current) return;
-
     if (isScreenSharing) {
+      // 1. Stop active screen sharing
       if (screenTrackRef.current) {
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
       }
 
+      // 2. Restore camera stream for local view & peer connections
       if (cameraTrackRef.current) {
+        const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+        const restoredCameraStream = new MediaStream([cameraTrackRef.current, ...audioTracks]);
+        localStreamRef.current = restoredCameraStream;
+        setLocalStream(restoredCameraStream);
+
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (sender && cameraTrackRef.current) {
@@ -464,6 +469,7 @@ export function useAuraWeave({
           }
         });
       }
+
       setIsScreenSharing(false);
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -475,26 +481,37 @@ export function useAuraWeave({
         );
       }
     } else {
+      // 1. Start Screen Sharing
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
+          video: { cursor: "always" } as any,
           audio: true
         });
         const screenTrack = screenStream.getVideoTracks()[0];
+        if (!screenTrack) return;
+
         screenTrackRef.current = screenTrack;
 
+        // Auto-stop when user clicks browser's native "Stop sharing" bar
         screenTrack.onended = () => {
           toggleScreenShare();
         };
 
+        // 2. Set local display to show screen share immediately
+        const audioTracks = localStreamRef.current ? localStreamRef.current.getAudioTracks() : [];
+        const combinedScreenStream = new MediaStream([screenTrack, ...audioTracks]);
+        localStreamRef.current = combinedScreenStream;
+        setLocalStream(combinedScreenStream);
+        setIsVideoMuted(false);
+        setIsScreenSharing(true);
+
+        // 3. Replace outgoing video track for all remote peers
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (sender) {
             sender.replaceTrack(screenTrack);
           }
         });
-
-        setIsScreenSharing(true);
 
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(
@@ -505,7 +522,7 @@ export function useAuraWeave({
           );
         }
       } catch (err) {
-        console.warn("Screen share cancelled:", err);
+        console.warn("Screen share cancelled or not allowed:", err);
       }
     }
   }, [isScreenSharing]);

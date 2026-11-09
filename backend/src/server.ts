@@ -198,20 +198,36 @@ app.post("/api/ai", async (req: Request, res: Response) => {
       ? "Extract clear action items from these meeting notes. Include owner and deadline only if stated. Do not invent details."
       : "Create concise, structured meeting minutes with: Summary, Key decisions, Action items, and Open questions. Do not invent details.";
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-        temperature: 0.3,
-        messages: [
-          { role: "system", content: "You are a precise meeting assistant. Only use information in the supplied notes." },
-          { role: "user", content: `${prompt}\n\nMeeting notes:\n${text}` }
-        ]
-      })
-    });
+    // Active high-speed Groq models
+    const primaryModel =
+      process.env.GROQ_MODEL && !process.env.GROQ_MODEL.includes("llama-3.3-70b")
+        ? process.env.GROQ_MODEL
+        : "openai/gpt-oss-120b";
 
-    const data = await response.json();
+    async function callGroq(modelName: string) {
+      return fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          temperature: 0.3,
+          messages: [
+            { role: "system", content: "You are a precise meeting assistant. Only use information in the supplied notes." },
+            { role: "user", content: `${prompt}\n\nMeeting notes:\n${text}` }
+          ]
+        })
+      });
+    }
+
+    let response = await callGroq(primaryModel);
+    let data = await response.json();
+
+    // Fallback if model ID doesn't exist on this API key
+    if (!response.ok && data?.error?.message?.includes("does not exist")) {
+      response = await callGroq("openai/gpt-oss-20b");
+      data = await response.json();
+    }
+
     if (!response.ok) return res.status(response.status).json({ error: data?.error?.message || "Groq request failed." });
     return res.status(200).json({ result: data.choices?.[0]?.message?.content || "No response generated." });
   } catch (error) {
