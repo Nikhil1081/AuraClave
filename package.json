@@ -1,0 +1,10 @@
+{
+  "name": "auraclave-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:backend": "npm --prefix backend install",
+    "build": "npm --prefix backend install && npm --prefix backend run build",
+    "start": "npm --prefix backend start"
+  }
+}
