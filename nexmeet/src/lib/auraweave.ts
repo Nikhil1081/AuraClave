@@ -430,12 +430,8 @@ export function useAuraWeave({
         const p = next.get(targetPeerId);
         if (p) {
           const existingTracks = p.stream ? p.stream.getTracks() : [];
-          const incomingTracks = event.streams[0]
-            ? event.streams[0].getTracks()
-            : [event.track];
           const allTracksMap = new Map<string, MediaStreamTrack>();
           existingTracks.forEach((t) => allTracksMap.set(t.id, t));
-          incomingTracks.forEach((t) => allTracksMap.set(t.id, t));
           allTracksMap.set(event.track.id, event.track);
 
           // Brand new MediaStream reference guarantees React re-render & triggers audio/video ref bindings immediately

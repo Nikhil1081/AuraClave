@@ -16,10 +16,8 @@ import {
   Check,
   LoaderCircle,
   X,
-  Hand,
   Users,
   Radio,
-  ArrowUpRight,
   UserCheck,
   MessageSquare,
   Send
@@ -46,7 +44,6 @@ export default function AuraWeaveConference({
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [quickCopied, setQuickCopied] = useState(false);
-  const [showHandsModal, setShowHandsModal] = useState(false);
 
   // In-Meeting Real-Time Chat State
   const [showChat, setShowChat] = useState(false);
@@ -57,13 +54,10 @@ export default function AuraWeaveConference({
   // AuraWeave 1,000-Participant Engine Hook
   const {
     myPeerId,
-    role,
     isStageMember,
     localStream,
     peers,
-    audienceCount,
     totalParticipants,
-    handsRaised,
     isAudioMuted,
     isVideoMuted,
     isScreenSharing,
@@ -74,7 +68,6 @@ export default function AuraWeaveConference({
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
-    promoteToStage,
     broadcastCaption,
     setOnCaptionReceived
   } = useAuraWeave({
@@ -155,7 +148,7 @@ export default function AuraWeaveConference({
     });
   }, []);
 
-  // Web Speech Recognition for Stage Members
+  // Web Speech Recognition for meeting participants
   useEffect(() => {
     if (!captionsEnabled || !isStageMember) {
       if (recognitionRef.current) {
@@ -339,7 +332,7 @@ export default function AuraWeaveConference({
     const notesText =
       transcript.length > 0
         ? transcript.map((t) => `${t.speaker} [${t.time}]: ${t.text}`).join("\n")
-        : `Meeting in room ${roomName} with ${totalParticipants} total attendees. Presenters and host leading discussion.`;
+        : `Meeting in room ${roomName} with ${totalParticipants} participants.`;
 
     try {
       const base = getApiBase();
@@ -376,13 +369,13 @@ export default function AuraWeaveConference({
   const myAvatar = user?.user_metadata?.avatar_url || "";
   const myInitial = (myName.trim() || "U")[0].toUpperCase();
 
-  const stageMembersCount = (isStageMember ? 1 : 0) + peers.length;
+  const participantTileCount = 1 + peers.length;
   const gridClass =
-    stageMembersCount <= 1
+    participantTileCount <= 1
       ? "grid-1"
-      : stageMembersCount === 2
+      : participantTileCount === 2
       ? "grid-2"
-      : stageMembersCount <= 4
+      : participantTileCount <= 4
       ? "grid-4"
       : "grid-multi";
 
@@ -397,30 +390,16 @@ export default function AuraWeaveConference({
         </Link>
 
         <div className="meeting-header-actions">
-          {/* AuraWeave 1,000 Capacity Badge */}
-          <div className="auraweave-badge" title="AuraWeave RTC™ 1,000 Capacity Stage & Audience Mesh">
+          {/* Meeting status */}
+          <div className="auraweave-badge" title="AuraWeave RTC™ meeting">
             <Radio size={13} className="text-emerald-400 animate-pulse" />
-            <span>AuraWeave 1K Stage</span>
+            <span>AuraWeave Meeting</span>
           </div>
 
-          {/* Live Audience Counter */}
           <div className="audience-pill" title={`${totalParticipants} total participants in this call`}>
             <Users size={13} />
-            <span>{totalParticipants} Live ({audienceCount} Audience)</span>
+            <span>{totalParticipants} Participants</span>
           </div>
-
-          {/* Hands Raised Indicator for Host */}
-          {role === "host" && handsRaised.length > 0 && (
-            <button
-              type="button"
-              className="hands-raised-indicator-btn"
-              onClick={() => setShowHandsModal(true)}
-              title={`${handsRaised.length} audience member(s) raised hand`}
-            >
-              <Hand size={14} className="hand-bounce" />
-              <span>{handsRaised.length} Raised</span>
-            </button>
-          )}
 
           <div className="meeting-room-id">
             <span className="status-dot" /> {roomName}
@@ -442,10 +421,10 @@ export default function AuraWeaveConference({
       {/* Main Content Area */}
       <div className={`meeting-content ${showChat ? "with-chat" : ""}`}>
         <div className="meeting-stage-area">
-          {/* Stage Video Grid */}
+          {/* Participant video grid */}
           <div className={`auraweave-grid ${gridClass}`}>
-            {/* Local Tile (if on Stage) */}
-            {isStageMember && (
+            {/* Local participant */}
+            {
               <div className="auraweave-tile local-tile">
                 <video
                   ref={(el) => {
@@ -476,7 +455,7 @@ export default function AuraWeaveConference({
                 )}
 
                 <div className="tile-meta">
-                  <span className="tile-name">{myName} (You • {role === "host" ? "Host" : "Presenter"})</span>
+                  <span className="tile-name">{myName} (You)</span>
                   {isAudioMuted ? (
                     <MicOff size={14} className="tile-muted-icon" />
                   ) : (
@@ -486,9 +465,9 @@ export default function AuraWeaveConference({
 
                 {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
               </div>
-            )}
+            }
 
-            {/* Remote Stage Peers (strictly excluding self) */}
+            {/* Remote participants */}
             {peers
               .filter(
                 (peer) =>
@@ -497,18 +476,18 @@ export default function AuraWeaveConference({
                   (!myName || peer.name !== myName)
               )
               .map((peer) => (
-                <RemoteStagePeerTile
+                <RemotePeerTile
                   key={peer.peerId}
                   peer={peer}
                 />
               ))}
 
-            {/* Empty Stage Placeholder when nobody else has joined */}
+            {/* Empty meeting placeholder when nobody else has joined */}
             {peers.length === 0 && (
               <div className="empty-stage-box">
                 <Radio size={36} className="text-violet-400 mb-2" />
-                <h3>The Stage is Ready</h3>
-                <p className="text-slate-400 text-sm">Host and presenters will appear here when they share video or screen.</p>
+                <h3>Waiting for participants</h3>
+                <p className="text-slate-400 text-sm">Other participants will appear here when they join.</p>
               </div>
             )}
           </div>
@@ -598,7 +577,7 @@ export default function AuraWeaveConference({
       {/* Floating Bottom Controls */}
       <footer className="meeting-footer">
         <div className="meeting-controls-wrap">
-          {/* Group 1: Media / Stage Controls */}
+          {/* Group 1: Media controls */}
           <div className="controls-group">
             <>
                 <button
@@ -710,70 +689,6 @@ export default function AuraWeaveConference({
         roomName={roomName}
       />
 
-      {/* Host Hands Raised Management Modal */}
-      {showHandsModal && (
-        <div className="ai-modal-backdrop" onClick={() => setShowHandsModal(false)}>
-          <div className="ai-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="ai-modal-header">
-              <div className="flex items-center gap-2">
-                <Hand size={18} className="text-violet-400" />
-                <h3>Raised Hands ({handsRaised.length})</h3>
-              </div>
-              <button className="icon-close" onClick={() => setShowHandsModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="ai-modal-body">
-              {handsRaised.length === 0 ? (
-                <p className="text-slate-400 text-sm">No audience members currently have their hand raised.</p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {handsRaised.map((h) => (
-                    <div key={h.peerId} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
-                      <div className="flex items-center gap-3">
-                        {h.avatarUrl ? (
-                          <img src={h.avatarUrl} alt={h.name} className="w-9 h-9 rounded-full object-cover" />
-                        ) : (
-                          <div className="w-9 h-9 rounded-full bg-violet-600 flex items-center justify-center font-bold text-white">
-                            {(h.name || "U")[0].toUpperCase()}
-                          </div>
-                        )}
-                        <div>
-                          <div className="font-semibold text-sm text-white">{h.name}</div>
-                          <div className="text-xs text-slate-400">Audience member requested to speak</div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        className="button primary small flex items-center gap-1.5"
-                        onClick={() => {
-                          promoteToStage(h.peerId);
-                          setShowHandsModal(false);
-                        }}
-                      >
-                        <ArrowUpRight size={14} /> Bring to Stage
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="ai-modal-footer">
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setShowHandsModal(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* AI Summary Modal */}
       {showAiModal && (
         <div className="ai-modal-backdrop" onClick={() => setShowAiModal(false)}>
@@ -833,8 +748,8 @@ export default function AuraWeaveConference({
   );
 }
 
-// Remote Stage Presenter Tile
-function RemoteStagePeerTile({
+// Remote participant tile
+function RemotePeerTile({
   peer
 }: {
   peer: AuraWeavePeer;
@@ -847,16 +762,18 @@ function RemoteStagePeerTile({
   // Dedicated background audio pipeline: guarantees remote voice is always heard even when video is off
   useEffect(() => {
     if (audioRef.current && peer.stream) {
-      const audioStream = new MediaStream(peer.stream.getAudioTracks());
-      if (audioRef.current.srcObject !== audioStream) {
-        audioRef.current.srcObject = audioStream;
+      if (audioRef.current.srcObject !== peer.stream) {
+        audioRef.current.srcObject = peer.stream;
       }
       audioRef.current.volume = 1;
       audioRef.current.muted = false;
-      audioRef.current.play().catch(() => {
-        // A later click is handled by the global autoplay unlocker.
-      });
+      const playAudio = () => audioRef.current?.play().catch(() => {});
+      audioRef.current.oncanplay = playAudio;
+      playAudio();
     }
+    return () => {
+      if (audioRef.current) audioRef.current.oncanplay = null;
+    };
   }, [peer.stream]);
 
   // Video playback
@@ -896,7 +813,7 @@ function RemoteStagePeerTile({
       )}
 
       <div className="tile-meta">
-        <span className="tile-name">{peer.name} ({peer.role === "host" ? "Host" : "Presenter"})</span>
+        <span className="tile-name">{peer.name}</span>
         {peer.isAudioMuted ? (
           <MicOff size={14} className="tile-muted-icon" />
         ) : (
