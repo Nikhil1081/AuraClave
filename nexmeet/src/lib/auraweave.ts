@@ -3,10 +3,11 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoQuality,
+  RemoteTrackPublication,
   ConnectionQuality,
   type Participant,
-  type RemoteTrack,
-  type RemoteTrackPublication
+  type RemoteTrack
 } from "livekit-client";
 import { getApiBase } from "./auth";
 
@@ -102,6 +103,13 @@ function peerFromParticipant(participant: Participant, stream?: MediaStream): Au
   };
 }
 
+function prioritizeScreenShare(participant: Participant) {
+  const publication = participant.getTrackPublication(Track.Source.ScreenShare);
+  if (!(publication instanceof RemoteTrackPublication)) return;
+  publication.setVideoQuality(VideoQuality.HIGH);
+  publication.setVideoDimensions({ width: 1920, height: 1080 });
+}
+
 export function useAuraWeave({
   roomName,
   user,
@@ -143,6 +151,7 @@ export function useAuraWeave({
   const syncPeers = useCallback(() => {
     const next = new Map<string, AuraWeavePeer>();
     room.remoteParticipants.forEach((participant) => {
+      prioritizeScreenShare(participant);
       const stream = peerStreamsRef.current.get(participant.identity) || new MediaStream();
       peerStreamsRef.current.set(participant.identity, stream);
       next.set(participant.identity, peerFromParticipant(participant, stream));
@@ -354,6 +363,11 @@ export function useAuraWeave({
       // setScreenShareEnabled(enabled, captureOptions)
       // Passing { audio: true } prompts for and captures tab/system audio alongside the screen share
       await room.localParticipant.setScreenShareEnabled(willEnable, { audio: true });
+      if (willEnable) {
+        const publication = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+        const mediaTrack = publication?.track?.mediaStreamTrack;
+        if (mediaTrack) mediaTrack.contentHint = "detail";
+      }
     } catch (err) {
       console.error("Screen share error:", err);
     } finally {
