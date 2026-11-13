@@ -415,23 +415,14 @@ export default function AuraWeaveConference({
     );
 
   const hasScreenShare = isScreenSharing || remotePeers.some(p => p.isScreenSharing);
-  const screenSharePeer = hasScreenShare
-    ? isScreenSharing
-      ? { isLocal: true }
-      : remotePeers.find(p => p.isScreenSharing)
-    : null;
+  const screenSharePeer = remotePeers.find((peer) => peer.isScreenSharing);
 
-  // Layout selection: screen share gets large main + sidebar, focus mode for few participants
+  // Sharing always switches to a presenter-plus-sidebar layout, including two-person calls.
   const gridClass =
-    // Screen share layout: large main tile + sidebar for others
-    hasScreenShare && (remotePeers.length >= 2 || (remotePeers.length >= 1 && !isScreenSharing))
+    hasScreenShare
       ? "layout-screen-share"
-    // Focus mode: speaker view with small sidebar for 1-3 remote participants
-    : remotePeers.length >= 1 && remotePeers.length <= 3
-      ? "layout-focus"
-      : // Standard grid layouts
-      (() => {
-          const count = 1 + peers.length;
+      : (() => {
+          const count = 1 + remotePeers.length;
           if (count <= 1) return "grid-1";
           if (count === 2) return "grid-2";
           if (count <= 4) return "grid-4";
@@ -536,6 +527,9 @@ export default function AuraWeaveConference({
                 return (
                   <>
                     <div className="screen-share-main">
+                      {screenSharePeer ? (
+                        <RemotePeerTile peer={screenSharePeer} />
+                      ) : (
                       <div className="auraweave-tile local-tile">
                         {isScreenSharing ? (
                           <video
@@ -593,9 +587,41 @@ export default function AuraWeaveConference({
                         </div>
                         {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
                       </div>
+                      )}
                     </div>
                     <div className="screen-share-sidebar">
-                      {remotePeers.map((peer) => (
+                      {!isScreenSharing && (
+                        <div className="auraweave-tile local-tile">
+                          <video
+                            ref={(el) => {
+                              if (el) {
+                                el.srcObject = localStream;
+                                if (localStream && !isVideoMuted) el.play().catch(() => {});
+                              }
+                            }}
+                            autoPlay
+                            playsInline
+                            muted
+                            style={{ display: !isVideoMuted ? "block" : "none" }}
+                            className="tile-video mirrored"
+                          />
+                          {isVideoMuted && (
+                            <div className="tile-placeholder">
+                              {myAvatar ? (
+                                <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+                              ) : (
+                                <div className="tile-avatar-fallback">{myInitial}</div>
+                              )}
+                            </div>
+                          )}
+                          <div className="tile-meta">
+                            <span className="tile-name">{myName} (You)</span>
+                            <span className={`tile-network-dot ${networkLevel}`} title={`Network: ${networkLevel}`} />
+                            {isAudioMuted ? <MicOff size={14} className="tile-muted-icon" /> : <Mic size={14} className="tile-mic-icon" />}
+                          </div>
+                        </div>
+                      )}
+                      {remotePeers.filter((peer) => peer.peerId !== screenSharePeer?.peerId).map((peer) => (
                         <RemotePeerTile key={peer.peerId} peer={peer} />
                       ))}
                     </div>
@@ -656,7 +682,7 @@ export default function AuraWeaveConference({
             })()}
 
             {/* Empty meeting placeholder when nobody else has joined */}
-            {peers.length === 0 && (
+            {remotePeers.length === 0 && !hasScreenShare && (
               <div className="empty-stage-box">
                 <Radio size={36} className="text-violet-400 mb-2" />
                 <h3>Waiting for participants</h3>
@@ -943,7 +969,7 @@ function RemotePeerTile({
 }) {
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
   // Always show video if stream exists - mute status doesn't hide video, only audio
-  const showVideo = Boolean(peer.stream);
+  const showVideo = Boolean(peer.stream) && (!peer.isVideoMuted || peer.isScreenSharing);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 

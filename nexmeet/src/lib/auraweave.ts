@@ -71,6 +71,8 @@ function mapConnectionQuality(quality: ConnectionQuality | undefined): 'good' | 
 
 function peerFromParticipant(participant: Participant): AuraWeavePeer {
   const stream = participantStream(participant);
+  const microphonePublication = participant.getTrackPublication(Track.Source.Microphone);
+  const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
   return {
     peerId: participantPeerId(participant),
     userId: participant.identity,
@@ -78,8 +80,12 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
     avatarUrl: "",
     role: "presenter",
     stream,
-    isAudioMuted: !participant.isMicrophoneEnabled,
-    isVideoMuted: !participant.isCameraEnabled,
+    isAudioMuted: microphonePublication
+      ? microphonePublication.isMuted
+      : !participant.isMicrophoneEnabled,
+    isVideoMuted: cameraPublication
+      ? cameraPublication.isMuted
+      : !participant.isCameraEnabled,
     isScreenSharing: participant.isScreenShareEnabled,
     networkLevel: mapConnectionQuality(participant.connectionQuality)
   };

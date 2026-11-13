@@ -2418,6 +2418,94 @@
   }
 }
 
+/* Meeting stage sizing and participant metadata */
+.meeting-content {
+  display: flex;
+  min-height: 0;
+}
+
+.meeting-stage-area {
+  min-height: 0;
+}
+
+.auraweave-grid {
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.auraweave-tile {
+  min-width: 0;
+  min-height: 0;
+}
+
+.tile-meta {
+  display: inline-flex;
+  align-items: center;
+  max-width: calc(100% - 24px);
+  min-width: 0;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(32, 33, 36, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.tile-name {
+  min-width: 0;
+  max-width: 220px;
+  flex: 1 1 auto;
+}
+
+.tile-network-dot {
+  margin: 0 !important;
+}
+
+.auraweave-grid.layout-screen-share {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-main {
+  min-height: 0;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-main > .auraweave-tile {
+  min-height: 0;
+  height: 100%;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar {
+  width: clamp(150px, 18vw, 230px);
+  min-height: 0;
+  padding: 0;
+  gap: 10px;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar .auraweave-tile {
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .meeting-content {
+    display: flex;
+  }
+
+  .auraweave-grid.layout-screen-share .screen-share-sidebar {
+    width: 100%;
+    height: clamp(92px, 18vh, 140px);
+  }
+
+  .auraweave-grid.layout-screen-share .screen-share-main {
+    min-height: 0;
+  }
+
+  .tile-name {
+    max-width: 150px;
+  }
+}
+
 .meeting-footer {
   position: fixed;
   bottom: 22px;
