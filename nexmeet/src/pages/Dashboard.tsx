@@ -15,6 +15,7 @@ export default function Dashboard() {
   const { user, signOut } = useAuth();
   const { t } = useLanguage();
   const [roomCode, setRoomCode] = useState("");
+  const [customMeetingName, setCustomMeetingName] = useState("");
   const [_copied, setCopied] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const navigate = useNavigate();
@@ -24,9 +25,14 @@ export default function Dashboard() {
   const initial = firstName[0]?.toUpperCase() || "U";
 
   function createMeeting() {
-    const room = makeRoom();
+    const room = customMeetingName.trim()
+      ? customMeetingName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-")
+      : makeRoom();
     try {
       sessionStorage.setItem(`auraclave_host_${room}`, "true");
+      if (customMeetingName.trim()) {
+        localStorage.setItem(`auraclave_title_${room}`, customMeetingName.trim());
+      }
     } catch {}
     navigate(`/meeting/${room}`, { state: { isHost: true } });
   }
@@ -120,6 +126,25 @@ export default function Dashboard() {
             <div className="eyebrow">START SOMETHING</div>
             <h2>{t("dash_start_instant")}</h2>
             <p>{t("dash_start_desc")}</p>
+            <div style={{ marginBottom: "14px" }}>
+              <input
+                type="text"
+                value={customMeetingName}
+                onChange={(e) => setCustomMeetingName(e.target.value)}
+                placeholder="Custom meeting name (e.g. Nikhil's Meeting)"
+                style={{
+                  width: "100%",
+                  padding: "9px 14px",
+                  borderRadius: "10px",
+                  background: "rgba(255, 255, 255, 0.08)",
+                  border: "1px solid rgba(255, 255, 255, 0.16)",
+                  color: "#fff",
+                  fontSize: "13px",
+                  outline: "none"
+                }}
+                onKeyDown={(e) => e.key === "Enter" && createMeeting()}
+              />
+            </div>
             <button className="button primary" onClick={createMeeting}>
               {t("dash_create_btn")} <ArrowRight size={17} />
             </button>

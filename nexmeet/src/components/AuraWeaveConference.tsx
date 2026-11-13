@@ -28,7 +28,10 @@ import {
   LayoutGrid,
   PanelRight,
   Wifi,
-  WifiOff
+  WifiOff,
+  ChevronDown,
+  ChevronUp,
+  Edit2
 } from "lucide-react";
 import Brand from "./Brand";
 import ShareMeetingModal from "./ShareMeetingModal";
@@ -56,6 +59,32 @@ export default function AuraWeaveConference({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [moderationError, setModerationError] = useState("");
   const meetingPageRef = useRef<HTMLDivElement>(null);
+
+  // Custom Meeting Name State
+  const [meetingTitle, setMeetingTitle] = useState(() => {
+    try {
+      return localStorage.getItem(`auraclave_title_${roomName}`) || "AuraWeave Meeting";
+    } catch {
+      return "AuraWeave Meeting";
+    }
+  });
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(meetingTitle);
+
+  // Responsive & Collapsible Toolbar State
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  const [isCompactToolbar, setIsCompactToolbar] = useState(false);
+  const toolbarContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      // Switch between large (icon + text) and compact (icon only) based on window width
+      setIsCompactToolbar(window.innerWidth < 880);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // In-Meeting Real-Time Chat State
   const [showChat, setShowChat] = useState(false);
@@ -501,10 +530,62 @@ export default function AuraWeaveConference({
         </Link>
 
         <div className="meeting-header-actions">
-          {/* Meeting status */}
-          <div className="auraweave-badge" title="AuraWeave RTC™ meeting">
+          {/* Meeting status with editable title */}
+          <div
+            className="auraweave-badge"
+            title={isHost ? "Click to edit meeting name" : "Meeting Name"}
+            style={{ cursor: isHost ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "6px" }}
+            onClick={() => {
+              if (isHost && !isEditingTitle) {
+                setTitleInput(meetingTitle);
+                setIsEditingTitle(true);
+              }
+            }}
+          >
             <Radio size={13} className="text-emerald-400 animate-pulse" />
-            <span>AuraWeave Meeting</span>
+            {isEditingTitle ? (
+              <input
+                type="text"
+                value={titleInput}
+                autoFocus
+                onChange={(e) => setTitleInput(e.target.value)}
+                onBlur={() => {
+                  const cleaned = titleInput.trim() || "AuraWeave Meeting";
+                  setMeetingTitle(cleaned);
+                  try {
+                    localStorage.setItem(`auraclave_title_${roomName}`, cleaned);
+                  } catch {}
+                  setIsEditingTitle(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const cleaned = titleInput.trim() || "AuraWeave Meeting";
+                    setMeetingTitle(cleaned);
+                    try {
+                      localStorage.setItem(`auraclave_title_${roomName}`, cleaned);
+                    } catch {}
+                    setIsEditingTitle(false);
+                  } else if (e.key === "Escape") {
+                    setIsEditingTitle(false);
+                  }
+                }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: "rgba(0,0,0,0.5)",
+                  border: "1px solid rgba(139, 92, 246, 0.6)",
+                  borderRadius: "4px",
+                  color: "#fff",
+                  fontSize: "12px",
+                  padding: "2px 6px",
+                  outline: "none"
+                }}
+              />
+            ) : (
+              <>
+                <span>{meetingTitle}</span>
+                {isHost && <Edit2 size={11} className="opacity-60 ml-1 hover:opacity-100" />}
+              </>
+            )}
           </div>
 
           <div className="audience-pill" title={`${totalParticipants} total participants in this call`}>
@@ -874,132 +955,157 @@ export default function AuraWeaveConference({
         )}
       </div>
 
-      {/* Floating Bottom Controls */}
+      {/* Floating Bottom Controls with Responsive Compact/Large & Collapse Handle */}
       <footer className="meeting-footer">
-        <div className="meeting-controls-wrap">
-          {/* Group 1: Media controls */}
-          <div className="controls-group">
-            <>
-                <button
-                  type="button"
-                  className={`control-btn ${isAudioMuted ? "danger" : ""}`}
-                  onClick={toggleAudio}
-                  title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
-                >
-                  {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
-                  <span>{isAudioMuted ? "Unmute" : "Mute"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className={`control-btn ${isVideoMuted ? "danger" : ""}`}
-                  onClick={toggleVideo}
-                  title={isVideoMuted ? "Start camera" : "Stop camera"}
-                >
-                  {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
-                  <span>{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className={`control-btn ${isScreenSharing ? "accent" : ""}`}
-                  onClick={toggleScreenShare}
-                  title="Share Screen to all attendees"
-                >
-                  <Monitor size={18} />
-                  <span>{isScreenSharing ? "Stop Sharing" : "Share"}</span>
-                </button>
-            </>
-          </div>
-
-          <div className="controls-divider" />
-
-          {/* Group 2: Collaboration, Captions & AI */}
-          <div className="controls-group">
-            <button
-              type="button"
-              className="control-btn"
-              onClick={() =>
-                setLayoutMode((current) =>
-                  current === "gallery"
-                    ? "focus"
-                    : current === "focus"
-                      ? "speaker"
-                      : current === "speaker"
-                        ? "pip"
-                        : "gallery"
-                )
-              }
-              title={`Change layout (current: ${layoutMode})`}
-              aria-label={`Change layout, currently ${layoutMode}`}
-            >
-              {layoutMode === "gallery" ? <LayoutGrid size={18} /> : <PanelRight size={18} />}
-              <span>{layoutMode}</span>
-            </button>
-            <LanguageSelector compact />
-
-            <button
-              type="button"
-              className={`control-btn ${captionsEnabled ? "accent" : ""}`}
-              onClick={() => setCaptionsEnabled(!captionsEnabled)}
-              title="Capture live transcript"
-            >
-              <Subtitles size={18} />
-              <span>Live Transcript</span>
-            </button>
-
-            <button
-              type="button"
-              className={`control-btn ${isRecording ? "danger recording-pulse" : ""}`}
-              onClick={toggleRecording}
-              title="Meeting Recorder (Zero Prompt)"
-            >
-              {isRecording ? <Square size={16} /> : <CircleDot size={18} />}
-              <span>{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
-            </button>
-
-            <button
-              type="button"
-              className={`control-btn ${showChat ? "accent" : ""}`}
-              onClick={() => {
-                setShowChat(!showChat);
-                setUnreadChatCount(0);
-              }}
-              title="Meeting Chat"
-            >
-              <MessageSquare size={18} />
-              <span>Chat</span>
-              {unreadChatCount > 0 && (
-                <span className="chat-unread-badge">{unreadChatCount}</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              className="control-btn ai-btn"
-              onClick={handleGenerateAiNotes}
-              title="Generate AI Meeting Minutes"
-            >
-              <Sparkles size={18} />
-              <span>AI Notes</span>
-            </button>
-          </div>
-
-          <div className="controls-divider" />
-
-          {/* Group 3: Leave Room */}
-          <div className="controls-group">
-            <button
-              type="button"
-              className="control-btn leave-btn"
-              onClick={handleLeave}
-              title="Leave meeting"
-            >
-              <PhoneOff size={18} />
-              <span>Leave</span>
-            </button>
-          </div>
+        {/* Manual Collapse / Expand Handle at top-center edge */}
+        <div className="toolbar-collapse-handle-wrap">
+          <button
+            type="button"
+            className="toolbar-toggle-btn"
+            onClick={() => setIsToolbarCollapsed((prev) => !prev)}
+            title={isToolbarCollapsed ? "Expand meeting toolbar" : "Collapse meeting toolbar"}
+            aria-label={isToolbarCollapsed ? "Expand meeting toolbar" : "Collapse meeting toolbar"}
+          >
+            {isToolbarCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
         </div>
+
+        {!isToolbarCollapsed && (
+          <div
+            ref={toolbarContainerRef}
+            className={`meeting-controls-wrap ${isCompactToolbar ? "compact-mode" : "large-mode"}`}
+          >
+            {/* Group 1: Media controls */}
+            <div className="controls-group">
+              <button
+                type="button"
+                className={`control-btn ${isAudioMuted ? "danger" : ""}`}
+                onClick={toggleAudio}
+                title={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
+                aria-label={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
+              >
+                {isAudioMuted ? <MicOff size={isCompactToolbar ? 19 : 20} /> : <Mic size={isCompactToolbar ? 19 : 20} />}
+                <span className="btn-label">{isAudioMuted ? "Unmute" : "Mute"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`control-btn ${isVideoMuted ? "danger" : ""}`}
+                onClick={toggleVideo}
+                title={isVideoMuted ? "Start camera" : "Stop camera"}
+                aria-label={isVideoMuted ? "Start camera" : "Stop camera"}
+              >
+                {isVideoMuted ? <VideoOff size={isCompactToolbar ? 19 : 20} /> : <Video size={isCompactToolbar ? 19 : 20} />}
+                <span className="btn-label">{isVideoMuted ? "Start Cam" : "Stop Cam"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`control-btn ${isScreenSharing ? "accent" : ""}`}
+                onClick={toggleScreenShare}
+                title="Share Screen to all attendees"
+                aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+              >
+                <Monitor size={isCompactToolbar ? 19 : 20} />
+                <span className="btn-label">{isScreenSharing ? "Stop Sharing" : "Share"}</span>
+              </button>
+            </div>
+
+            <div className="controls-divider" />
+
+            {/* Group 2: Collaboration, Captions & AI */}
+            <div className="controls-group">
+              <button
+                type="button"
+                className="control-btn"
+                onClick={() =>
+                  setLayoutMode((current) =>
+                    current === "gallery"
+                      ? "focus"
+                      : current === "focus"
+                        ? "speaker"
+                        : current === "speaker"
+                          ? "pip"
+                          : "gallery"
+                  )
+                }
+                title={`Change layout (current: ${layoutMode})`}
+                aria-label={`Change layout, currently ${layoutMode}`}
+              >
+                {layoutMode === "gallery" ? <LayoutGrid size={isCompactToolbar ? 19 : 20} /> : <PanelRight size={isCompactToolbar ? 19 : 20} />}
+                <span className="btn-label">{layoutMode}</span>
+              </button>
+
+              <LanguageSelector compact />
+
+              <button
+                type="button"
+                className={`control-btn ${captionsEnabled ? "accent" : ""}`}
+                onClick={() => setCaptionsEnabled(!captionsEnabled)}
+                title="Capture live transcript"
+                aria-label="Toggle live transcript captions"
+              >
+                <Subtitles size={isCompactToolbar ? 19 : 20} />
+                <span className="btn-label">Captions</span>
+              </button>
+
+              <button
+                type="button"
+                className={`control-btn ${isRecording ? "danger recording-pulse" : ""}`}
+                onClick={toggleRecording}
+                title="Meeting Recorder"
+                aria-label={isRecording ? "Stop recording" : "Start recording"}
+              >
+                {isRecording ? <Square size={isCompactToolbar ? 16 : 18} /> : <CircleDot size={isCompactToolbar ? 19 : 20} />}
+                <span className="btn-label">{isRecording ? `Rec ${formatTime(recordingSeconds)}` : "Record"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`control-btn ${showChat ? "accent" : ""}`}
+                onClick={() => {
+                  setShowChat(!showChat);
+                  setUnreadChatCount(0);
+                }}
+                title="Meeting Chat"
+                aria-label="Toggle meeting chat"
+              >
+                <MessageSquare size={isCompactToolbar ? 19 : 20} />
+                <span className="btn-label">Chat</span>
+                {unreadChatCount > 0 && (
+                  <span className="chat-unread-badge">{unreadChatCount}</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="control-btn ai-btn"
+                onClick={handleGenerateAiNotes}
+                title="Generate AI Meeting Minutes"
+                aria-label="Generate AI meeting notes"
+              >
+                <Sparkles size={isCompactToolbar ? 19 : 20} />
+                <span className="btn-label">AI Notes</span>
+              </button>
+            </div>
+
+            <div className="controls-divider" />
+
+            {/* Group 3: Leave Room */}
+            <div className="controls-group">
+              <button
+                type="button"
+                className="control-btn leave-btn"
+                onClick={handleLeave}
+                title="Leave meeting"
+                aria-label="Leave meeting"
+              >
+                <PhoneOff size={isCompactToolbar ? 19 : 20} />
+                <span className="btn-label">Leave</span>
+              </button>
+            </div>
+          </div>
+        )}
       </footer>
 
       {/* Share Modal */}
