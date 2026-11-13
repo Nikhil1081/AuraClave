@@ -2064,41 +2064,358 @@
 
 .tile-meta {
   position: absolute;
-  bottom: 12px;
-  left: 12px;
+  bottom: 10px;
+  left: 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(8px);
-  padding: 5px 10px;
-  border-radius: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #f8fafc;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   z-index: 10;
 }
 
+.tile-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Network quality dot - now inline and compact */
+.tile-network-dot {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 8px !important;
+  height: 8px !important;
+  min-width: 8px !important;
+  min-height: 8px !important;
+  border-radius: 50% !important;
+  margin: 0 3px 0 0 !important;
+  flex-shrink: 0 !important;
+  position: relative !important;
+  z-index: 15 !important;
+}
+.tile-network-dot.good {
+  background-color: #22c55e !important;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.9) !important;
+}
+.tile-network-dot.fair {
+  background-color: #f59e0b !important;
+  box-shadow: 0 0 4px rgba(245, 158, 11, 0.9) !important;
+}
+.tile-network-dot.poor {
+  background-color: #ef4444 !important;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.9) !important;
+}
+
 .tile-mic-icon {
   color: #22c55e;
+  flex-shrink: 0;
 }
 
 .tile-muted-icon {
   color: #ef4444;
+  flex-shrink: 0;
 }
 
 .tile-screen-badge {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  background: rgba(59, 130, 246, 0.85);
+  top: 10px;
+  right: 10px;
+  background: rgba(59, 130, 246, 0.9);
   color: #ffffff;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.02em;
+  text-transform: uppercase;
+  z-index: 15;
+}
+
+/* Screen share layout - larger presenter tile with sidebar for others */
+.auraweave-grid.layout-screen-share {
+  display: flex !important;
+  gap: 12px;
+  padding: 12px;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-main .auraweave-tile {
+  height: 100%;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(auto-fill, 1fr);
+  gap: 10px;
+  overflow-y: auto;
+  padding: 4px;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar .auraweave-tile {
+  height: auto;
+  min-height: 100px;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar .tile-video {
+  height: 100%;
+  object-fit: cover;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar .tile-placeholder,
+.auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-img,
+.auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-fallback {
+  width: 56px;
+  height: 56px;
+}
+
+.auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-fallback {
+  font-size: 24px;
+}
+
+.auraweave-grid.layout-screen-share .tile-meta {
+  font-size: 10px;
+  padding: 3px 6px;
+  bottom: 8px;
+  left: 8px;
+}
+
+.auraweave-grid.layout-screen-share .tile-name {
+  max-width: 80px;
+  font-size: 10px;
+}
+
+.auraweave-grid.layout-screen-share .tile-network-dot {
+  width: 7px !important;
+  height: 7px !important;
+  min-width: 7px !important;
+  min-height: 7px !important;
+}
+
+.auraweave-grid.layout-screen-share .sidebar-label {
+  position: initial;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 10px;
+  color: #8f9bb0;
+  width: 100%;
+  text-align: center;
+  padding-bottom: 4px;
+}
+
+@media (max-width: 900px) {
+  .auraweave-grid.layout-screen-share {
+    flex-direction: column;
+  }
+  
+  .auraweave-grid.layout-screen-share .screen-share-main {
+    min-height: 300px;
+  }
+  
+  .auraweave-grid.layout-screen-share .screen-share-sidebar {
+    width: 100%;
+    height: 120px;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  .auraweave-grid.layout-screen-share .screen-share-sidebar .auraweave-tile {
+    min-width: 80px;
+    min-height: 80px;
+    flex-shrink: 0;
+  }
+  
+  .auraweave-grid.layout-screen-share .screen-share-sidebar .tile-placeholder,
+  .auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-img,
+  .auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-fallback {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .auraweave-grid.layout-screen-share .screen-share-sidebar .tile-avatar-fallback {
+    font-size: 18px;
+  }
+}
+
+/* Focus mode - single tile fullscreen with blurred sidebar */
+.auraweave-grid.layout-focus {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+}
+
+.auraweave-grid.layout-focus .focus-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-focus .focus-main .auraweave-tile {
+  height: 100%;
+  min-height: 0;
+  border-radius: 16px;
+}
+
+.auraweave-grid.layout-focus .focus-sidebar {
+  width: 140px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(auto-fill, 1fr);
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.auraweave-grid.layout-focus .focus-sidebar .auraweave-tile {
+  height: auto;
+  min-height: 90px;
+  opacity: 0.7;
+}
+
+.auraweave-grid.layout-focus .focus-sidebar .tile-placeholder,
+.auraweave-grid.layout-focus .focus-sidebar .tile-avatar-img,
+.auraweave-grid.layout-focus .focus-sidebar .tile-avatar-fallback {
+  width: 44px;
+  height: 44px;
+}
+
+.auraweave-grid.layout-focus .focus-sidebar .tile-avatar-fallback {
+  font-size: 20px;
+}
+
+.auraweave-grid.layout-focus .tile-meta {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 4px 8px;
+}
+
+@media (max-width: 900px) {
+  .auraweave-grid.layout-focus .focus-sidebar {
+    display: none;
+  }
+}
+
+/* Pip mode - main tile with picture-in-picture for self */
+.auraweave-grid.layout-pip {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 120px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.auraweave-grid.layout-pip .pip-main {
+  grid-row: 1;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-pip .pip-main .auraweave-tile {
+  height: 100%;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-pip .pip-bottom {
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.auraweave-grid.layout-pip .pip-bottom .auraweave-tile {
+  height: 100%;
+  min-height: 100px;
+}
+
+.auraweave-grid.layout-pip .pip-bottom .tile-placeholder,
+.auraweave-grid.layout-pip .pip-bottom .tile-avatar-img,
+.auraweave-grid.layout-pip .pip-bottom .tile-avatar-fallback {
+  width: 48px;
+  height: 48px;
+}
+
+.auraweave-grid.layout-pip .pip-bottom .tile-avatar-fallback {
+  font-size: 22px;
+}
+
+.auraweave-grid.layout-pip .tile-meta {
+  font-size: 10px;
+  padding: 3px 6px;
+  bottom: 6px;
+  left: 6px;
+}
+
+.auraweave-grid.layout-pip .tile-name {
+  max-width: 70px;
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .auraweave-grid.layout-pip {
+    grid-template-rows: 1fr 80px;
+  }
+  
+  .auraweave-grid.layout-pip .pip-bottom .auraweave-tile {
+    min-height: 60px;
+  }
+  
+  .auraweave-grid.layout-pip .pip-bottom .tile-placeholder,
+  .auraweave-grid.layout-pip .pip-bottom .tile-avatar-img,
+  .auraweave-grid.layout-pip .pip-bottom .tile-avatar-fallback {
+    width: 32px;
+    height: 32px;
+  }
+  
+  .auraweave-grid.layout-pip .pip-bottom .tile-avatar-fallback {
+    font-size: 14px;
+  }
+}
+
+/* Grid layout variants for different participant counts */
+.auraweave-grid.layout-speaker-view {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  gap: 10px;
+  padding: 12px;
+}
+
+.auraweave-grid.layout-speaker-view .auraweave-tile {
+  height: 100%;
+  min-height: 0;
+}
+
+.auraweave-grid.layout-speaker-view .tile-meta {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  padding: 5px 10px;
+}
+
+@media (max-width: 600px) {
+  .auraweave-grid.layout-speaker-view {
+    padding: 8px;
+  }
 }
 
 .meeting-footer {

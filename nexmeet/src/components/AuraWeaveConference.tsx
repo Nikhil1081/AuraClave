@@ -406,15 +406,37 @@ export default function AuraWeaveConference({
   const myAvatar = user?.user_metadata?.avatar_url || "";
   const myInitial = (myName.trim() || "U")[0].toUpperCase();
 
-  const participantTileCount = 1 + peers.length;
+  const remotePeers = peers
+    .filter(
+      (peer) =>
+        peer.peerId !== myPeerId &&
+        (!user?.id || peer.userId !== user.id) &&
+        (!myName || peer.name !== myName)
+    );
+
+  const hasScreenShare = isScreenSharing || remotePeers.some(p => p.isScreenSharing);
+  const screenSharePeer = hasScreenShare
+    ? isScreenSharing
+      ? { isLocal: true }
+      : remotePeers.find(p => p.isScreenSharing)
+    : null;
+
+  // Layout selection: screen share gets large main + sidebar, focus mode for few participants
   const gridClass =
-    participantTileCount <= 1
-      ? "grid-1"
-      : participantTileCount === 2
-      ? "grid-2"
-      : participantTileCount <= 4
-      ? "grid-4"
-      : "grid-multi";
+    // Screen share layout: large main tile + sidebar for others
+    hasScreenShare && (remotePeers.length >= 2 || (remotePeers.length >= 1 && !isScreenSharing))
+      ? "layout-screen-share"
+    // Focus mode: speaker view with small sidebar for 1-3 remote participants
+    : remotePeers.length >= 1 && remotePeers.length <= 3
+      ? "layout-focus"
+      : // Standard grid layouts
+      (() => {
+          const count = 1 + peers.length;
+          if (count <= 1) return "grid-1";
+          if (count === 2) return "grid-2";
+          if (count <= 4) return "grid-4";
+          return "grid-multi";
+        })();
 
   return (
     <div className="meeting-page">
@@ -509,65 +531,129 @@ export default function AuraWeaveConference({
           )}
           {/* Participant video grid */}
           <div className={`auraweave-grid ${gridClass}`}>
-            {/* Local participant */}
-            {
-              <div className="auraweave-tile local-tile">
-                <video
-                  ref={(el) => {
-                    if (el) {
-                      if (el.srcObject !== localStream) {
-                        el.srcObject = localStream;
-                      }
-                      if (localStream && (!isVideoMuted || isScreenSharing)) {
-                        el.play().catch(() => {});
-                      }
-                    }
-                  }}
-                  autoPlay
-                  playsInline
-                  muted
-                  style={{ display: isVideoMuted && !isScreenSharing ? "none" : "block" }}
-                  className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
-                />
+            {(() => {
+              if (gridClass === "layout-screen-share" && hasScreenShare) {
+                return (
+                  <>
+                    <div className="screen-share-main">
+                      <div className="auraweave-tile local-tile">
+                        {isScreenSharing ? (
+                          <video
+                            ref={(el) => {
+                              if (el) {
+                                if (el.srcObject !== localStream) {
+                                  el.srcObject = localStream;
+                                }
+                                if (localStream) {
+                                  el.play().catch(() => {});
+                                }
+                              }
+                            }}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="tile-video screen"
+                          />
+                        ) : (
+                          <video
+                            ref={(el) => {
+                              if (el) {
+                                if (el.srcObject !== localStream) {
+                                  el.srcObject = localStream;
+                                }
+                                if (localStream && (!isVideoMuted || isScreenSharing)) {
+                                  el.play().catch(() => {});
+                                }
+                              }
+                            }}
+                            autoPlay
+                            playsInline
+                            muted
+                            style={{ display: isVideoMuted && !isScreenSharing ? "none" : "block" }}
+                            className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
+                          />
+                        )}
+                        {isVideoMuted && !isScreenSharing && (
+                          <div className="tile-placeholder">
+                            {myAvatar ? (
+                              <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+                            ) : (
+                              <div className="tile-avatar-fallback">{myInitial}</div>
+                            )}
+                          </div>
+                        )}
+                        <div className="tile-meta">
+                          <span className="tile-name">{myName} (You)</span>
+                          <span className={`tile-network-dot ${networkLevel}`} title={`Network: ${networkLevel}`} />
+                          {isAudioMuted ? (
+                            <MicOff size={14} className="tile-muted-icon" />
+                          ) : (
+                            <Mic size={14} className="tile-mic-icon" />
+                          )}
+                        </div>
+                        {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
+                      </div>
+                    </div>
+                    <div className="screen-share-sidebar">
+                      {remotePeers.map((peer) => (
+                        <RemotePeerTile key={peer.peerId} peer={peer} />
+                      ))}
+                    </div>
+                  </>
+                );
+              }
+              return (
+                <>
+                  {/* Local participant */}
+                  <div className="auraweave-tile local-tile">
+                    <video
+                      ref={(el) => {
+                        if (el) {
+                          if (el.srcObject !== localStream) {
+                            el.srcObject = localStream;
+                          }
+                          if (localStream && (!isVideoMuted || isScreenSharing)) {
+                            el.play().catch(() => {});
+                          }
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{ display: isVideoMuted && !isScreenSharing ? "none" : "block" }}
+                      className={`tile-video ${isScreenSharing ? "screen" : "mirrored"}`}
+                    />
 
-                {isVideoMuted && !isScreenSharing && (
-                  <div className="tile-placeholder">
-                    {myAvatar ? (
-                      <img src={myAvatar} alt={myName} className="tile-avatar-img" />
-                    ) : (
-                      <div className="tile-avatar-fallback">{myInitial}</div>
+                    {isVideoMuted && !isScreenSharing && (
+                      <div className="tile-placeholder">
+                        {myAvatar ? (
+                          <img src={myAvatar} alt={myName} className="tile-avatar-img" />
+                        ) : (
+                          <div className="tile-avatar-fallback">{myInitial}</div>
+                        )}
+                      </div>
                     )}
+
+                    <div className="tile-meta">
+                      <span className="tile-name">{myName} (You)</span>
+                      <span className={`tile-network-dot ${networkLevel}`} title={`Network: ${networkLevel}`} />
+                      {isAudioMuted ? (
+                        <MicOff size={14} className="tile-muted-icon" />
+                      ) : (
+                        <Mic size={14} className="tile-mic-icon" />
+                      )}
+                    </div>
+
+                    {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
                   </div>
-                )}
 
-                <div className="tile-meta">
-                  <span className="tile-name">{myName} (You)</span>
-                  <span className={`tile-network-dot ${networkLevel}`} title={`Network: ${networkLevel}`} />
-                  {isAudioMuted ? (
-                    <MicOff size={14} className="tile-muted-icon" />
-                  ) : (
-                    <Mic size={14} className="tile-mic-icon" />
-                  )}
-                </div>
-
-                {isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
-              </div>
-            }
-
-            {/* Remote participants */}
-            {peers
-              .filter(
-                (peer) =>
-                  peer.peerId !== myPeerId &&
-                  (!user?.id || peer.userId !== user.id) &&
-                  (!myName || peer.name !== myName)
-              )
-              .map((peer) => (
-                <RemotePeerTile
-                  key={peer.peerId}
-                  peer={peer}
-                />
-              ))}
+                  {/* Remote participants */}
+                  {remotePeers.map((peer) => (
+                    <RemotePeerTile key={peer.peerId} peer={peer} />
+                  ))}
+                </>
+              );
+            })()}
 
             {/* Empty meeting placeholder when nobody else has joined */}
             {peers.length === 0 && (
@@ -856,7 +942,8 @@ function RemotePeerTile({
   peer: AuraWeavePeer;
 }) {
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
-  const showVideo = Boolean(peer.stream && (!peer.isVideoMuted || peer.isScreenSharing));
+  // Always show video if stream exists - mute status doesn't hide video, only audio
+  const showVideo = Boolean(peer.stream);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -887,7 +974,7 @@ function RemotePeerTile({
         videoRef.current.play().catch(() => {});
       }
     }
-  }, [peer.stream, showVideo]);
+  }, [peer.stream]);
 
   return (
     <div className="auraweave-tile remote-tile">
