@@ -286,8 +286,16 @@ export function useAuraWeave({
   }, [room, syncLocal]);
 
   const toggleScreenShare = useCallback(async () => {
-    await room.localParticipant.setScreenShareEnabled(!room.localParticipant.isScreenShareEnabled);
-    syncLocal();
+    try {
+      const willEnable = !room.localParticipant.isScreenShareEnabled;
+      // setScreenShareEnabled(enabled, captureOptions)
+      // Passing { audio: true } prompts for and captures tab/system audio alongside the screen share
+      await room.localParticipant.setScreenShareEnabled(willEnable, { audio: true });
+    } catch (err) {
+      console.error("Screen share error:", err);
+    } finally {
+      syncLocal();
+    }
   }, [room, syncLocal]);
 
   const sendChatMessage = useCallback(
