@@ -138,6 +138,7 @@ export function useAuraWeave({
   const [networkLevel, setNetworkLevel] = useState<'good' | 'fair' | 'poor'>('good');
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
   const localStreamRef = useRef<MediaStream>(new MediaStream());
+  const incomingChunksRef = useRef(new Map<string, {chunks: string[]; total: number}>());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
   const syncLocal = useCallback(() => {
@@ -184,7 +185,6 @@ export function useAuraWeave({
     const onParticipantChanged = (_publication: unknown, participant: Participant) =>
       refreshParticipant(participant);
     // ---- Chat data handling with chunk reassembly ----
-  const incomingChunksRef = useRef(new Map<string, {chunks: string[]; total: number}>());
   const onData = (payload: Uint8Array, participant?: Participant) => {
     try {
       const message = JSON.parse(new TextDecoder().decode(payload));
