@@ -2452,9 +2452,14 @@
 }
 
 .tile-name {
+  position: static !important;
+  display: block;
   min-width: 0;
   max-width: 220px;
   flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tile-network-dot {
