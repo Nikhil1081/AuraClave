@@ -54,14 +54,21 @@ function participantPeerId(participant: Participant): string {
   return participant.identity;
 }
 
-function participantStream(participant: Participant): MediaStream {
+function participantStream(participant: Participant, stream = new MediaStream()): MediaStream {
   const tracks: MediaStreamTrack[] = [];
   participant.trackPublications.forEach((publication) => {
     if (publication.track?.mediaStreamTrack) {
       tracks.push(publication.track.mediaStreamTrack);
     }
   });
-  return new MediaStream(tracks);
+  const desiredTracks = new Set(tracks);
+  stream.getTracks().forEach((track) => {
+    if (!desiredTracks.has(track)) stream.removeTrack(track);
+  });
+  tracks.forEach((track) => {
+    if (!stream.getTracks().includes(track)) stream.addTrack(track);
+  });
+  return stream;
 }
 
 function mapConnectionQuality(quality: ConnectionQuality | undefined): 'good' | 'fair' | 'poor' {
@@ -71,8 +78,8 @@ function mapConnectionQuality(quality: ConnectionQuality | undefined): 'good' | 
   return 'good';
 }
 
-function peerFromParticipant(participant: Participant): AuraWeavePeer {
-  const stream = participantStream(participant);
+function peerFromParticipant(participant: Participant, stream?: MediaStream): AuraWeavePeer {
+  const participantMediaStream = participantStream(participant, stream);
   const microphonePublication = participant.getTrackPublication(Track.Source.Microphone);
   const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
   return {
@@ -81,7 +88,7 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
     name: participant.name || participant.identity,
     avatarUrl: "",
     role: "presenter",
-    stream,
+    stream: participantMediaStream,
     isAudioMuted: microphonePublication
       ? microphonePublication.isMuted
       : !participant.isMicrophoneEnabled,
@@ -122,9 +129,12 @@ export function useAuraWeave({
   const [reactions, setReactions] = useState<{ id: string; emoji: string; name: string }[]>([]);
   const [networkLevel, setNetworkLevel] = useState<'good' | 'fair' | 'poor'>('good');
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
+  const localStreamRef = useRef<MediaStream>(new MediaStream());
+  const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
   const syncLocal = useCallback(() => {
-    setLocalStream(participantStream(room.localParticipant));
+    const stream = participantStream(room.localParticipant, localStreamRef.current);
+    setLocalStream(stream);
     setIsAudioMuted(!room.localParticipant.isMicrophoneEnabled);
     setIsVideoMuted(!room.localParticipant.isCameraEnabled);
     setIsScreenSharing(room.localParticipant.isScreenShareEnabled);
@@ -133,7 +143,12 @@ export function useAuraWeave({
   const syncPeers = useCallback(() => {
     const next = new Map<string, AuraWeavePeer>();
     room.remoteParticipants.forEach((participant) => {
-      next.set(participant.identity, peerFromParticipant(participant));
+      const stream = peerStreamsRef.current.get(participant.identity) || new MediaStream();
+      peerStreamsRef.current.set(participant.identity, stream);
+      next.set(participant.identity, peerFromParticipant(participant, stream));
+    });
+    peerStreamsRef.current.forEach((_stream, peerId) => {
+      if (!room.remoteParticipants.get(peerId)) peerStreamsRef.current.delete(peerId);
     });
     setPeers(next);
     setTotalParticipants(room.numParticipants || 1);
