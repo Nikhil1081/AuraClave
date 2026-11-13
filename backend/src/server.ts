@@ -4,7 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { getAuthenticatedUser, generateToken } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import {
   requestToJoin,
   checkAdmission,
@@ -32,6 +32,23 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy" });
 });
 
+function getLiveKitRoomService(): RoomServiceClient {
+  const livekitUrl = process.env.LIVEKIT_URL;
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (!livekitUrl || !apiKey || !apiSecret) {
+    throw new Error("LiveKit room service is not configured.");
+  }
+  return new RoomServiceClient(livekitUrl.replace(/^wss?:\/\//, "https://"), apiKey, apiSecret);
+}
+
+async function requireRoomHost(roomName: string, userId: string) {
+  const room = getRoom(roomName);
+  if (!room || room.hostId !== userId) {
+    throw new Error("Only the meeting host can moderate participants.");
+  }
+}
+
 app.post("/api/livekit/token", async (req: Request, res: Response) => {
   try {
     const user = await getAuthenticatedUser(req);
@@ -52,6 +69,7 @@ app.post("/api/livekit/token", async (req: Request, res: Response) => {
       name: user.user_metadata.full_name || user.email,
       ttl: "2h"
     });
+
     token.addGrant({
       room: roomName,
       roomJoin: true,
@@ -340,6 +358,39 @@ app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) =>
       openToAll: updated.openToAll,
       waitingRoomEnabled: updated.waitingRoomEnabled,
       waitingCount: updated.waitingList.size
+    });
+
+    app.post("/api/room/:roomName/moderation/remove", async (req: Request, res: Response) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const roomName = String(req.params.roomName);
+        const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
+        if (!participantId) return res.status(400).json({ error: "A participant is required." });
+        await requireRoomHost(roomName, user.id);
+        await getLiveKitRoomService().removeParticipant(roomName, participantId);
+        return res.status(200).json({ success: true });
+      } catch (err: any) {
+        const message = err?.message || "Unable to remove participant.";
+        return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
+      }
+    });
+
+    app.post("/api/room/:roomName/moderation/mute", async (req: Request, res: Response) => {
+      try {
+        const user = await getAuthenticatedUser(req);
+        const roomName = String(req.params.roomName);
+        const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
+        const trackSid = typeof req.body?.trackSid === "string" ? req.body.trackSid.trim() : "";
+        if (!participantId || !trackSid) {
+          return res.status(400).json({ error: "A participant and audio track are required." });
+        }
+        await requireRoomHost(roomName, user.id);
+        await getLiveKitRoomService().mutePublishedTrack(roomName, participantId, trackSid, true);
+        return res.status(200).json({ success: true });
+      } catch (err: any) {
+        const message = err?.message || "Unable to mute participant.";
+        return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
+      }
     });
   } catch (err: any) {
     return res.status(401).json({ error: err?.message || "Authentication failed." });

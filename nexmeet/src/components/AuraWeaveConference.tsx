@@ -22,7 +22,13 @@ import {
   MessageSquare,
   Send,
   Hand,
-  Smile
+  Smile,
+  Maximize2,
+  Minimize2,
+  LayoutGrid,
+  PanelRight,
+  Wifi,
+  WifiOff
 } from "lucide-react";
 import Brand from "./Brand";
 import ShareMeetingModal from "./ShareMeetingModal";
@@ -41,11 +47,15 @@ export default function AuraWeaveConference({
   isHost: boolean;
 }) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { language, t, currentSpeechCode } = useLanguage();
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [quickCopied, setQuickCopied] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<"gallery" | "focus" | "speaker" | "pip">("gallery");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [moderationError, setModerationError] = useState("");
+  const meetingPageRef = useRef<HTMLDivElement>(null);
 
   // In-Meeting Real-Time Chat State
   const [showChat, setShowChat] = useState(false);
@@ -67,6 +77,7 @@ export default function AuraWeaveConference({
     chatMessages,
     sendChatMessage,
     connected,
+    connectionStatus,
     error: rtcError,
     toggleAudio,
     toggleVideo,
@@ -89,6 +100,20 @@ export default function AuraWeaveConference({
       : null,
     isHost
   });
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+    await meetingPageRef.current?.requestFullscreen();
+  };
 
   // Global Audio Autoplay Policy Unblocker
   useEffect(() => {
@@ -396,6 +421,35 @@ export default function AuraWeaveConference({
     navigate("/dashboard");
   };
 
+  const moderateParticipant = async (
+    action: "mute" | "remove",
+    peer: AuraWeavePeer
+  ) => {
+    if (!isHost || !session?.access_token) return;
+    const base = getApiBase();
+    const path = `/api/room/${encodeURIComponent(roomName)}/moderation/${action}`;
+    try {
+      const response = await fetch(base ? `${base}${path}` : path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          participantId: peer.peerId,
+          trackSid: peer.audioTrackSid
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Unable to ${action} participant.`);
+      }
+      setModerationError("");
+    } catch (error) {
+      setModerationError(error instanceof Error ? error.message : `Unable to ${action} participant.`);
+    }
+  };
+
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -421,6 +475,12 @@ export default function AuraWeaveConference({
   const gridClass =
     hasScreenShare
       ? "layout-screen-share"
+      : layoutMode === "focus"
+        ? "layout-focus"
+        : layoutMode === "speaker"
+          ? "layout-speaker-view"
+          : layoutMode === "pip"
+            ? "layout-pip"
       : (() => {
           const count = 1 + remotePeers.length;
           if (count <= 1) return "grid-1";
@@ -430,7 +490,7 @@ export default function AuraWeaveConference({
         })();
 
   return (
-    <div className="meeting-page">
+    <div className="meeting-page" ref={meetingPageRef}>
       {/* Header */}
       <header className="meeting-header">
         <Link to="/dashboard" className="meeting-brand">
@@ -455,6 +515,11 @@ export default function AuraWeaveConference({
             <span className="status-dot" /> {roomName}
           </div>
 
+          <div className={`meeting-connection-status ${connectionStatus}`}>
+            {connectionStatus === "connected" ? <Wifi size={13} /> : <WifiOff size={13} />}
+            <span>{connectionStatus === "reconnecting" ? "Reconnecting…" : connectionStatus}</span>
+          </div>
+
           {isHost && <HostAdmissionBanner roomName={roomName} />}
 
           <button
@@ -464,6 +529,16 @@ export default function AuraWeaveConference({
           >
             <Share2 size={14} />
             <span>{quickCopied ? "Link Copied!" : "Share Link"}</span>
+          </button>
+
+          <button
+            type="button"
+            className="control-btn header-icon-btn"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          >
+            {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
           </button>
 
           <button
@@ -520,6 +595,14 @@ export default function AuraWeaveConference({
               ))}
             </div>
           )}
+          {moderationError && (
+            <div className="meeting-inline-error" role="alert">
+              {moderationError}
+              <button type="button" onClick={() => setModerationError("")} aria-label="Dismiss error">
+                <X size={14} />
+              </button>
+            </div>
+          )}
           {/* Participant video grid */}
           <div className={`auraweave-grid ${gridClass}`}>
             {(() => {
@@ -528,7 +611,12 @@ export default function AuraWeaveConference({
                   <>
                     <div className="screen-share-main">
                       {screenSharePeer ? (
-                        <RemotePeerTile peer={screenSharePeer} />
+                        <RemotePeerTile
+                          peer={screenSharePeer}
+                          isHost={isHost}
+                          onMute={(peer) => moderateParticipant("mute", peer)}
+                          onRemove={(peer) => moderateParticipant("remove", peer)}
+                        />
                       ) : (
                       <div className="auraweave-tile local-tile">
                         {isScreenSharing ? (
@@ -622,7 +710,13 @@ export default function AuraWeaveConference({
                         </div>
                       )}
                       {remotePeers.filter((peer) => peer.peerId !== screenSharePeer?.peerId).map((peer) => (
-                        <RemotePeerTile key={peer.peerId} peer={peer} />
+                        <RemotePeerTile
+                          key={peer.peerId}
+                          peer={peer}
+                          isHost={isHost}
+                          onMute={(item) => moderateParticipant("mute", item)}
+                          onRemove={(item) => moderateParticipant("remove", item)}
+                        />
                       ))}
                     </div>
                   </>
@@ -675,7 +769,13 @@ export default function AuraWeaveConference({
 
                   {/* Remote participants */}
                   {remotePeers.map((peer) => (
-                    <RemotePeerTile key={peer.peerId} peer={peer} />
+                    <RemotePeerTile
+                      key={peer.peerId}
+                      peer={peer}
+                      isHost={isHost}
+                      onMute={(item) => moderateParticipant("mute", item)}
+                      onRemove={(item) => moderateParticipant("remove", item)}
+                    />
                   ))}
                 </>
               );
@@ -815,6 +915,26 @@ export default function AuraWeaveConference({
 
           {/* Group 2: Collaboration, Captions & AI */}
           <div className="controls-group">
+            <button
+              type="button"
+              className="control-btn"
+              onClick={() =>
+                setLayoutMode((current) =>
+                  current === "gallery"
+                    ? "focus"
+                    : current === "focus"
+                      ? "speaker"
+                      : current === "speaker"
+                        ? "pip"
+                        : "gallery"
+                )
+              }
+              title={`Change layout (current: ${layoutMode})`}
+              aria-label={`Change layout, currently ${layoutMode}`}
+            >
+              {layoutMode === "gallery" ? <LayoutGrid size={18} /> : <PanelRight size={18} />}
+              <span>{layoutMode}</span>
+            </button>
             <LanguageSelector compact />
 
             <button
@@ -963,9 +1083,15 @@ export default function AuraWeaveConference({
 
 // Remote participant tile
 function RemotePeerTile({
-  peer
+  peer,
+  isHost,
+  onMute,
+  onRemove
 }: {
   peer: AuraWeavePeer;
+  isHost?: boolean;
+  onMute?: (peer: AuraWeavePeer) => void;
+  onRemove?: (peer: AuraWeavePeer) => void;
 }) {
   const initial = (peer.name.trim() || "P")[0].toUpperCase();
   // Always show video if stream exists - mute status doesn't hide video, only audio
@@ -1003,7 +1129,7 @@ function RemotePeerTile({
   }, [peer.stream]);
 
   return (
-    <div className="auraweave-tile remote-tile">
+    <div className={`auraweave-tile remote-tile ${peer.isSpeaking ? "is-speaking" : ""}`}>
       {/* Background audio pipeline: guarantees 100% audio transmission regardless of video visibility */}
       <audio ref={audioRef} autoPlay playsInline controls={false} />
 
@@ -1037,6 +1163,17 @@ function RemotePeerTile({
       </div>
 
       {peer.isScreenSharing && <div className="tile-screen-badge">Presenting Screen</div>}
+      {peer.isSpeaking && <span className="tile-speaking-badge">Speaking</span>}
+      {isHost && (
+        <div className="tile-host-actions">
+          <button type="button" onClick={() => onMute?.(peer)} title={`Mute ${peer.name}`}>
+            <MicOff size={13} />
+          </button>
+          <button type="button" onClick={() => onRemove?.(peer)} title={`Remove ${peer.name}`}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
     </div>
   );

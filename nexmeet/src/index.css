@@ -2511,6 +2511,162 @@
   }
 }
 
+.meeting-page:fullscreen {
+  background: #202124;
+}
+
+.meeting-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  color: #bdc1c6;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.meeting-connection-status.connected {
+  color: #81c995;
+}
+
+.meeting-connection-status.reconnecting,
+.meeting-connection-status.connecting {
+  color: #fdd663;
+}
+
+.meeting-connection-status.disconnected {
+  color: #f28b82;
+}
+
+.header-icon-btn {
+  width: 38px !important;
+  height: 38px !important;
+  padding: 0 !important;
+}
+
+.auraweave-tile.is-speaking {
+  box-shadow: inset 0 0 0 2px #8ab4f8, 0 0 22px rgba(138, 180, 248, 0.24);
+}
+
+.tile-speaking-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 15;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(32, 33, 36, 0.82);
+  color: #8ab4f8;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tile-host-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  gap: 5px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.auraweave-tile:hover .tile-host-actions,
+.tile-host-actions:focus-within {
+  opacity: 1;
+}
+
+.tile-host-actions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(32, 33, 36, 0.86);
+  color: #f8fafc;
+}
+
+.tile-host-actions button:hover {
+  background: #ea4335;
+}
+
+.meeting-inline-error {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100% - 28px));
+  padding: 10px 12px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(242, 139, 130, 0.45);
+  border-radius: 9px;
+  background: rgba(60, 20, 20, 0.94);
+  color: #f28b82;
+  font-size: 12px;
+}
+
+.meeting-inline-error button {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.auraweave-grid.layout-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-rows: 1fr;
+  gap: 10px;
+  padding: 0;
+}
+
+.auraweave-grid.layout-focus .auraweave-tile:first-child {
+  grid-row: 1;
+}
+
+.auraweave-grid.layout-speaker-view {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-rows: 1fr;
+  gap: 10px;
+  padding: 0;
+}
+
+.auraweave-grid.layout-pip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(88px, 22%);
+  gap: 10px;
+  padding: 0;
+}
+
+.auraweave-grid.layout-pip .auraweave-tile:first-child {
+  min-height: 0;
+}
+
+.auraweave-grid.layout-pip .auraweave-tile:not(:first-child) {
+  min-height: 0;
+}
+
+@media (max-width: 850px) {
+  .meeting-connection-status span {
+    display: none;
+  }
+
+  .meeting-connection-status {
+    padding: 8px;
+  }
+}
+
 .meeting-footer {
   position: fixed;
   bottom: 22px;

@@ -22,6 +22,8 @@ export interface AuraWeavePeer {
   isAudioMuted: boolean;
   isVideoMuted: boolean;
   isScreenSharing: boolean;
+  isSpeaking: boolean;
+  audioTrackSid?: string;
   networkLevel: 'good' | 'fair' | 'poor';
 }
 
@@ -87,6 +89,8 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
       ? cameraPublication.isMuted
       : !participant.isCameraEnabled,
     isScreenSharing: participant.isScreenShareEnabled,
+    isSpeaking: participant.isSpeaking,
+    audioTrackSid: microphonePublication?.trackSid,
     networkLevel: mapConnectionQuality(participant.connectionQuality)
   };
 }
@@ -109,6 +113,9 @@ export function useAuraWeave({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [totalParticipants, setTotalParticipants] = useState(1);
   const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connecting' | 'connected' | 'reconnecting' | 'disconnected'
+  >('disconnected');
   const [error, setError] = useState<string | null>(null);
   const [handsRaised, setHandsRaised] = useState<HandRaisedUser[]>([]);
   const [myHandRaised, setMyHandRaised] = useState(false);
@@ -220,6 +227,17 @@ export function useAuraWeave({
           .on(RoomEvent.TrackUnmuted, onParticipantChanged)
           .on(RoomEvent.ParticipantConnected, (participant) => refreshParticipant(participant))
           .on(RoomEvent.ParticipantDisconnected, () => syncPeers())
+          .on(RoomEvent.ActiveSpeakersChanged, () => syncPeers())
+          .on(RoomEvent.Reconnecting, () => setConnectionStatus('reconnecting'))
+          .on(RoomEvent.Reconnected, () => {
+            setConnectionStatus('connected');
+            syncLocal();
+            syncPeers();
+          })
+          .on(RoomEvent.Disconnected, () => {
+            setConnected(false);
+            setConnectionStatus('disconnected');
+          })
           .on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
             if (participant === room.localParticipant) {
               setNetworkLevel(mapConnectionQuality(quality));
@@ -229,6 +247,7 @@ export function useAuraWeave({
           })
           .on(RoomEvent.DataReceived, onData);
 
+        setConnectionStatus('connecting');
         await room.connect(data.url, data.token);
         if (!active) {
           await room.disconnect();
@@ -238,6 +257,7 @@ export function useAuraWeave({
         syncLocal();
         syncPeers();
         setConnected(true);
+        setConnectionStatus('connected');
 
         const refreshToken = async () => {
           try {
@@ -270,6 +290,7 @@ export function useAuraWeave({
             syncLocal();
             syncPeers();
           } catch (refreshError) {
+            setConnectionStatus('reconnecting');
             setError(
               refreshError instanceof Error
                 ? `Meeting token refresh failed: ${refreshError.message}`
@@ -282,6 +303,7 @@ export function useAuraWeave({
         return () => window.clearInterval(refreshTimer);
       } catch (err) {
         if (active) {
+          setConnectionStatus('disconnected');
           setError(err instanceof Error ? err.message : "Unable to connect to the meeting SFU.");
         }
       }
@@ -297,6 +319,7 @@ export function useAuraWeave({
       room.removeAllListeners();
       room.disconnect();
       setConnected(false);
+      setConnectionStatus('disconnected');
     };
   }, [room, roomName, user?.id, isHost, refreshParticipant, syncLocal, syncPeers]);
 
@@ -413,6 +436,7 @@ export function useAuraWeave({
     chatMessages,
     sendChatMessage,
     connected,
+    connectionStatus,
     error,
     toggleAudio,
     toggleVideo,
