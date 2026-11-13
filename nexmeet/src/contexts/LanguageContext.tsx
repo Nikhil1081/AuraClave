@@ -31,7 +31,7 @@ export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: "bn", label: "Bengali", nativeName: "বাংলা", speechCode: "bn-IN" },
   { code: "gu", label: "Gujarati", nativeName: "ગુજરાતી", speechCode: "gu-IN" },
   { code: "pa", label: "Punjabi", nativeName: "ਪੰਜਾਬੀ", speechCode: "pa-IN" },
-  { code: "or", label: "Odia", nativeName: "ଓଡ଼ିଆ", speechCode: "hi-IN" }
+  { code: "or", label: "Odia", nativeName: "ଓଡ଼ିଆ", speechCode: "or-IN" }
 ];
 
 const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {

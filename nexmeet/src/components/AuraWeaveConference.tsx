@@ -381,7 +381,8 @@ export default function AuraWeaveConference({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           text: notesText.slice(-20000),
-          task: "summarize"
+          task: "summarize",
+          language
         })
       });
 

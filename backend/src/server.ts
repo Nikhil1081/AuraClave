@@ -195,7 +195,7 @@ app.get("/api/auth/me", async (req: Request, res: Response) => {
 app.post("/api/ai", async (req: Request, res: Response) => {
   try {
     await getAuthenticatedUser(req);
-    const { text, task = "summarize" } = req.body ?? {};
+    const { text, task = "summarize", language = "en" } = req.body ?? {};
     if (typeof text !== "string" || text.trim().length < 10 || text.length > 20000) {
       return res.status(400).json({ error: "Provide meeting notes between 10 and 20,000 characters." });
     }
@@ -205,9 +205,23 @@ app.post("/api/ai", async (req: Request, res: Response) => {
       return res.status(503).json({ error: "Groq is not configured yet. Add GROQ_API_KEY in your server environment." });
     }
 
+    const languageNames: Record<string, string> = {
+      en: "English",
+      hi: "Hindi",
+      te: "Telugu",
+      ta: "Tamil",
+      kn: "Kannada",
+      ml: "Malayalam",
+      mr: "Marathi",
+      bn: "Bengali",
+      gu: "Gujarati",
+      pa: "Punjabi",
+      or: "Odia"
+    };
+    const outputLanguage = languageNames[language] || "English";
     const prompt = task === "action-items"
-      ? "Extract clear, humanized action items from these meeting notes. Highlight owners and next steps naturally. Avoid robotic phrasing."
-      : "Write humanized, professional, and well-structured meeting notes from the supplied live transcript and chat. Treat [Transcript] lines as spoken content and [Chat] lines as written participant contributions. Do not invent quotes, speakers, decisions, or action items. Use friendly yet executive language with clean bullet points. Include:\n- ✨ Executive Overview\n- 💡 Key Takeaways & Highlights\n- 🚀 Next Steps & Action Items\n- 💬 Important Chat Contributions\nMake it feel like a smart Chief of Staff wrote it, not a machine.";
+      ? `Extract clear, humanized action items from these meeting notes in ${outputLanguage}. Highlight owners and next steps naturally. Avoid robotic phrasing.`
+      : `Write humanized, professional, and well-structured meeting notes in ${outputLanguage} from the supplied live transcript and chat. Treat [Transcript] lines as spoken content and [Chat] lines as written participant contributions. Do not invent quotes, speakers, decisions, or action items. Use friendly yet executive language with clean bullet points. Include:\n- Executive Overview\n- Key Takeaways & Highlights\n- Next Steps & Action Items\n- Important Chat Contributions\nMake it feel like a smart Chief of Staff wrote it, not a machine.`;
 
     // Active high-speed Groq models
     const primaryModel =
@@ -380,12 +394,20 @@ app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) =>
         const user = await getAuthenticatedUser(req);
         const roomName = String(req.params.roomName);
         const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
-        const trackSid = typeof req.body?.trackSid === "string" ? req.body.trackSid.trim() : "";
-        if (!participantId || !trackSid) {
-          return res.status(400).json({ error: "A participant and audio track are required." });
+        let trackSid = typeof req.body?.trackSid === "string" ? req.body.trackSid.trim() : "";
+        if (!participantId) {
+          return res.status(400).json({ error: "A participant is required." });
         }
         await requireRoomHost(roomName, user.id);
-        await getLiveKitRoomService().mutePublishedTrack(roomName, participantId, trackSid, true);
+        const roomService = getLiveKitRoomService();
+        if (!trackSid) {
+          const participant = await roomService.getParticipant(roomName, participantId);
+          trackSid = participant.tracks.find((track) => track.source === 2)?.sid || "";
+        }
+        if (!trackSid) {
+          return res.status(400).json({ error: "The participant has no active microphone track." });
+        }
+        await roomService.mutePublishedTrack(roomName, participantId, trackSid, true);
         return res.status(200).json({ success: true });
       } catch (err: any) {
         const message = err?.message || "Unable to mute participant.";
