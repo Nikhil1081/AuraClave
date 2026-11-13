@@ -3,6 +3,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  ConnectionQuality,
   type Participant,
   type RemoteTrack,
   type RemoteTrackPublication
@@ -21,7 +22,9 @@ export interface AuraWeavePeer {
   isAudioMuted: boolean;
   isVideoMuted: boolean;
   isScreenSharing: boolean;
+  networkLevel: 'good' | 'fair' | 'poor';
 }
+
 
 export interface HandRaisedUser {
   peerId: string;
@@ -61,6 +64,10 @@ function participantStream(participant: Participant): MediaStream {
 
 function peerFromParticipant(participant: Participant): AuraWeavePeer {
   const stream = participantStream(participant);
+  // Map LiveKit ConnectionQuality enum to our 3-level indicator
+  let net: 'good' | 'fair' | 'poor' = 'good';
+  if (participant.connectionQuality === ConnectionQuality.Poor) net = 'fair';
+  if (participant.connectionQuality === ConnectionQuality.Lost || participant.connectionQuality === ConnectionQuality.Unknown) net = 'poor';
   return {
     peerId: participantPeerId(participant),
     userId: participant.identity,
@@ -70,7 +77,8 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
     stream,
     isAudioMuted: !participant.isMicrophoneEnabled,
     isVideoMuted: !participant.isCameraEnabled,
-    isScreenSharing: participant.isScreenShareEnabled
+    isScreenSharing: participant.isScreenShareEnabled,
+    networkLevel: net
   };
 }
 
@@ -96,6 +104,7 @@ export function useAuraWeave({
   const [handsRaised, setHandsRaised] = useState<HandRaisedUser[]>([]);
   const [myHandRaised, setMyHandRaised] = useState(false);
   const [reactions, setReactions] = useState<{ id: string; emoji: string; name: string }[]>([]);
+  const [networkLevel, setNetworkLevel] = useState<'good' | 'fair' | 'poor'>('good');
   const onCaptionReceivedRef = useRef<((speaker: string, text: string) => void) | null>(null);
 
   const syncLocal = useCallback(() => {
@@ -202,6 +211,20 @@ export function useAuraWeave({
           .on(RoomEvent.TrackUnmuted, onParticipantChanged)
           .on(RoomEvent.ParticipantConnected, (participant) => refreshParticipant(participant))
           .on(RoomEvent.ParticipantDisconnected, () => syncPeers())
+          .on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
+            // Map LiveKit ConnectionQuality to our three-level indicator
+            if (participant === room.localParticipant) {
+              if (quality === ConnectionQuality.Excellent || quality === ConnectionQuality.Good) {
+                setNetworkLevel('good');
+              } else if (quality === ConnectionQuality.Poor) {
+                setNetworkLevel('fair');
+              } else {
+                setNetworkLevel('poor');
+              }
+            }
+            // Also refresh remote peers so their tiles update
+            syncPeers();
+          })
           .on(RoomEvent.DataReceived, onData);
 
         await room.connect(data.url, data.token);
@@ -397,6 +420,7 @@ export function useAuraWeave({
     promoteToStage: () => {},
     demoteToAudience: () => {},
     broadcastCaption,
+    networkLevel,
     setOnCaptionReceived: (fn: (speaker: string, text: string) => void) => {
       onCaptionReceivedRef.current = fn;
     }

@@ -205,6 +205,30 @@
   padding: 7px 10px;
 }
 
+/* ── Network Quality Indicator Dot ── */
+.tile-network-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 5px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  box-shadow: 0 0 4px currentColor;
+}
+.tile-network-dot.good {
+  background: #34d399;
+  color: #34d399;
+}
+.tile-network-dot.fair {
+  background: #fbbf24;
+  color: #fbbf24;
+}
+.tile-network-dot.poor {
+  background: #f87171;
+  color: #f87171;
+}
+
 .empty-stage-box {
   min-height: 260px;
   border: 1px dashed rgba(255, 255, 255, 0.18);

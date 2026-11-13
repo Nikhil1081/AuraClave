@@ -76,7 +76,8 @@ export default function AuraWeaveConference({
     sendReaction,
     reactions,
     broadcastCaption,
-    setOnCaptionReceived
+    setOnCaptionReceived,
+    networkLevel
   } = useAuraWeave({
     roomName,
     user: user
@@ -541,6 +542,7 @@ export default function AuraWeaveConference({
 
                 <div className="tile-meta">
                   <span className="tile-name">{myName} (You)</span>
+                  <span className={`tile-network-dot ${networkLevel}`} title={`Network: ${networkLevel}`} />
                   {isAudioMuted ? (
                     <MicOff size={14} className="tile-muted-icon" />
                   ) : (
@@ -913,6 +915,7 @@ function RemotePeerTile({
 
       <div className="tile-meta">
         <span className="tile-name">{peer.name}</span>
+        <span className={`tile-network-dot ${peer.networkLevel}`} title={`Network: ${peer.networkLevel}`} />
         {peer.isAudioMuted ? (
           <MicOff size={14} className="tile-muted-icon" />
         ) : (
