@@ -62,12 +62,15 @@ function participantStream(participant: Participant): MediaStream {
   return new MediaStream(tracks);
 }
 
+function mapConnectionQuality(quality: ConnectionQuality | undefined): 'good' | 'fair' | 'poor' {
+  if (quality === ConnectionQuality.Poor) return 'fair';
+  if (quality === ConnectionQuality.Lost) return 'poor';
+  // Default to 'good' (green) for Excellent, Good, or initial Unknown when connected
+  return 'good';
+}
+
 function peerFromParticipant(participant: Participant): AuraWeavePeer {
   const stream = participantStream(participant);
-  // Map LiveKit ConnectionQuality enum to our 3-level indicator
-  let net: 'good' | 'fair' | 'poor' = 'good';
-  if (participant.connectionQuality === ConnectionQuality.Poor) net = 'fair';
-  if (participant.connectionQuality === ConnectionQuality.Lost || participant.connectionQuality === ConnectionQuality.Unknown) net = 'poor';
   return {
     peerId: participantPeerId(participant),
     userId: participant.identity,
@@ -78,7 +81,7 @@ function peerFromParticipant(participant: Participant): AuraWeavePeer {
     isAudioMuted: !participant.isMicrophoneEnabled,
     isVideoMuted: !participant.isCameraEnabled,
     isScreenSharing: participant.isScreenShareEnabled,
-    networkLevel: net
+    networkLevel: mapConnectionQuality(participant.connectionQuality)
   };
 }
 
@@ -212,15 +215,8 @@ export function useAuraWeave({
           .on(RoomEvent.ParticipantConnected, (participant) => refreshParticipant(participant))
           .on(RoomEvent.ParticipantDisconnected, () => syncPeers())
           .on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
-            // Map LiveKit ConnectionQuality to our three-level indicator
             if (participant === room.localParticipant) {
-              if (quality === ConnectionQuality.Excellent || quality === ConnectionQuality.Good) {
-                setNetworkLevel('good');
-              } else if (quality === ConnectionQuality.Poor) {
-                setNetworkLevel('fair');
-              } else {
-                setNetworkLevel('poor');
-              }
+              setNetworkLevel(mapConnectionQuality(quality));
             }
             // Also refresh remote peers so their tiles update
             syncPeers();

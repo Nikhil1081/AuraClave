@@ -207,26 +207,30 @@
 
 /* ── Network Quality Indicator Dot ── */
 .tile-network-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-left: 5px;
-  flex-shrink: 0;
-  vertical-align: middle;
-  box-shadow: 0 0 4px currentColor;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 9px !important;
+  height: 9px !important;
+  min-width: 9px !important;
+  min-height: 9px !important;
+  border-radius: 50% !important;
+  margin: 0 4px !important;
+  flex-shrink: 0 !important;
+  position: relative !important;
+  z-index: 15 !important;
 }
 .tile-network-dot.good {
-  background: #34d399;
-  color: #34d399;
+  background-color: #22c55e !important;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.9) !important;
 }
 .tile-network-dot.fair {
-  background: #fbbf24;
-  color: #fbbf24;
+  background-color: #f59e0b !important;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.9) !important;
 }
 .tile-network-dot.poor {
-  background: #f87171;
-  color: #f87171;
+  background-color: #ef4444 !important;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.9) !important;
 }
 
 .empty-stage-box {
