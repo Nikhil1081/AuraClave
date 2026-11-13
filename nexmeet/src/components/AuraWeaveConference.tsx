@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { MeetingToolbar } from "./MeetingToolbar";
 import {
   Mic,
   MicOff,
@@ -47,8 +48,11 @@ export default function AuraWeaveConference({
   isHost: boolean;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, session } = useAuth();
   const { language, t, currentSpeechCode } = useLanguage();
+  const [meetingName, setMeetingName] = useState(roomName);
+
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [quickCopied, setQuickCopied] = useState(false);
@@ -584,6 +588,23 @@ export default function AuraWeaveConference({
         </div>
       </header>
 
+{/* Meeting name editable */}
+<div className="flex justify-center py-2">
+  <input
+    type="text"
+    value={meetingName}
+    onChange={(e) => {
+      setMeetingName(e.target.value);
+      const params = new URLSearchParams(location.search);
+      params.set('room', e.target.value);
+      navigate({ search: params.toString() }, { replace: true });
+    }}
+    className="bg-gray-800 text-white rounded px-3 py-1 w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+    placeholder="Enter meeting name"
+    aria-label="Meeting name"
+  />
+</div>
+
       {/* Main Content Area */}
       <div className={`meeting-content ${showChat ? "with-chat" : ""}`}>
         <div className="meeting-stage-area">
@@ -606,29 +627,18 @@ export default function AuraWeaveConference({
           )}
           {/* Participant video grid */}
           {/* Layout selector and hide self view toggle */}
-        <div className="meeting-controls top-right flex items-center space-x-2 mb-2">
-          {/* Layout selector */}
-          <select
-            value={layoutMode}
-            onChange={(e) => setLayoutMode(e.target.value as any)}
-            className="rounded border p-1 text-sm"
-            aria-label="Layout selector"
-          >
-            <option value="gallery">Gallery</option>
-            <option value="focus">Focus</option>
-            <option value="speaker">Speaker</option>
-            <option value="pip">Picture‑in‑Picture</option>
-            <option value="screenShare">Screen‑share</option>
-          </select>
-          {/* Hide self view toggle */}
-          <button
-            onClick={() => setShowSelf(!showSelf)}
-            className="rounded bg-gray-200 p-1 text-sm"
-            aria-label="Toggle self view"
-          >
-            {showSelf ? "Hide Me" : "Show Me"}
-          </button>
-        </div>
+        {/* Meeting Toolbar */}
+        <MeetingToolbar
+          micOn={!isAudioMuted}
+          camOn={!isVideoMuted}
+          screenOn={isScreenSharing}
+          chatOpen={showChat}
+          onToggleMic={toggleAudio}
+          onToggleCamera={toggleVideo}
+          onToggleScreenShare={toggleScreenShare}
+          onToggleChat={() => setShowChat((v)=>!v)}
+          onLeave={handleLeave}
+        />
         <div className={`auraweave-grid ${gridClass}`}>
             {(() => {
               if (gridClass === "layout-screen-share" && hasScreenShare) {

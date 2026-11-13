@@ -183,51 +183,85 @@ export function useAuraWeave({
     };
     const onParticipantChanged = (_publication: unknown, participant: Participant) =>
       refreshParticipant(participant);
-    const onData = (payload: Uint8Array, participant?: Participant) => {
-      try {
-        const message = JSON.parse(new TextDecoder().decode(payload));
-        if (message.type === "chat") {
-          setChatMessages((previous) => [
-            ...previous,
-            {
-              id: message.id,
-              peerId: participant?.identity || "",
-              senderName: participant?.name || "Participant",
-              senderAvatar: "",
-              text: message.text,
-              time: message.time,
-              isSelf: false
-            }
-          ]);
-        } else if (message.type === "caption") {
-          onCaptionReceivedRef.current?.(message.speaker, message.text);
-        } else if (message.type === "hand") {
-          const handUser: HandRaisedUser = {
-            peerId: participant?.identity || "",
-            userId: participant?.identity || "",
-            name: participant?.name || "Participant",
-            avatarUrl: ""
-          };
-          setHandsRaised((previous) =>
-            message.raised
-              ? [...previous.filter((item) => item.peerId !== handUser.peerId), handUser]
-              : previous.filter((item) => item.peerId !== handUser.peerId)
-          );
-        } else if (message.type === "reaction" && typeof message.emoji === "string") {
-          const reaction = {
-            id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            emoji: message.emoji,
-            name: participant?.name || "Participant"
-          };
-          setReactions((previous) => [...previous.slice(-4), reaction]);
-          window.setTimeout(() => {
-            setReactions((previous) => previous.filter((item) => item.id !== reaction.id));
-          }, 3000);
+    // ---- Chat data handling with chunk reassembly ----
+  const incomingChunksRef = useRef(new Map<string, {chunks: string[]; total: number}>());
+  const onData = (payload: Uint8Array, participant?: Participant) => {
+    try {
+      const message = JSON.parse(new TextDecoder().decode(payload));
+      // Chunked chat messages
+      if (message.type === "chat" && typeof message.chunkData !== "undefined") {
+        const id = message.id;
+        let entry = incomingChunksRef.current.get(id);
+        if (!entry) {
+          entry = { chunks: new Array(message.totalChunks), total: message.totalChunks };
+          incomingChunksRef.current.set(id, entry);
         }
-      } catch {
-        setError("Received invalid meeting data from LiveKit.");
+        entry.chunks[message.chunkIndex] = message.chunkData;
+        // If all chunks received, reassemble
+        if (entry.chunks.filter(Boolean).length === entry.total) {
+          const fullStr = entry.chunks.join("");
+          try {
+            const fullMsg = JSON.parse(fullStr);
+            setChatMessages((prev) => [
+              ...prev,
+              {
+                id: fullMsg.id,
+                peerId: participant?.identity || "",
+                senderName: participant?.name || "Participant",
+                senderAvatar: "",
+                text: fullMsg.text,
+                time: fullMsg.time,
+                isSelf: false
+              }
+            ]);
+          } catch {}
+          incomingChunksRef.current.delete(id);
+        }
+        return; // done handling chunked message
       }
-    };
+      // Non‑chunked or other message types
+      if (message.type === "chat") {
+        setChatMessages((previous) => [
+          ...previous,
+          {
+            id: message.id,
+            peerId: participant?.identity || "",
+            senderName: participant?.name || "Participant",
+            senderAvatar: "",
+            text: message.text,
+            time: message.time,
+            isSelf: false
+          }
+        ]);
+      } else if (message.type === "caption") {
+        onCaptionReceivedRef.current?.(message.speaker, message.text);
+      } else if (message.type === "hand") {
+        const handUser: HandRaisedUser = {
+          peerId: participant?.identity || "",
+          userId: participant?.identity || "",
+          name: participant?.name || "Participant",
+          avatarUrl: ""
+        };
+        setHandsRaised((previous) =>
+          message.raised
+            ? [...previous.filter((item) => item.peerId !== handUser.peerId), handUser]
+            : previous.filter((item) => item.peerId !== handUser.peerId)
+        );
+      } else if (message.type === "reaction" && typeof message.emoji === "string") {
+        const reaction = {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          emoji: message.emoji,
+          name: participant?.name || "Participant"
+        };
+        setReactions((previous) => [...previous.slice(-4), reaction]);
+        window.setTimeout(() => {
+          setReactions((previous) => previous.filter((item) => item.id !== reaction.id));
+        }, 3000);
+      }
+    } catch {
+      setError("Received invalid meeting data from LiveKit.");
+    }
+  };
 
     async function connect() {
       try {
@@ -375,30 +409,50 @@ export function useAuraWeave({
     }
   }, [room, syncLocal]);
 
+  // ------------------- Chat message chunking -------------------
+  const MAX_DATA_BYTES = 15000; // LiveKit reliable data safe limit
+  const chunkString = (str: string): string[] => {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    const chunks: string[] = [];
+    for (let i = 0; i < bytes.length; i += MAX_DATA_BYTES) {
+      const slice = bytes.slice(i, i + MAX_DATA_BYTES);
+      chunks.push(new TextDecoder().decode(slice));
+    }
+    return chunks;
+  };
+
   const sendChatMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const message = {
+      const baseMessage = {
         type: "chat",
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         text: trimmed,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       };
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          ...message,
-          peerId: user?.id || "",
-          senderName: user?.name || "You",
-          senderAvatar: user?.avatarUrl || "",
-          isSelf: true
-        }
+      // Optimistically add to UI
+      setChatMessages((prev) => [
+        ...prev,
+        { ...baseMessage, peerId: user?.id || "", senderName: user?.name || "You", senderAvatar: user?.avatarUrl || "", isSelf: true }
       ]);
-      await room.localParticipant.publishData(
-        new TextEncoder().encode(JSON.stringify(message)),
-        { reliable: true }
-      );
+      // Chunk payload and send sequentially
+      const payload = JSON.stringify(baseMessage);
+      const chunks = chunkString(payload);
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkMsg = {
+          ...baseMessage,
+          chunkIndex: i,
+          totalChunks: chunks.length,
+          chunkData: chunks[i]
+        };
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(JSON.stringify(chunkMsg)),
+          { reliable: true }
+        );
+        await new Promise((r) => setTimeout(r, 10)); // small pause
+      }
     },
     [room, user]
   );
