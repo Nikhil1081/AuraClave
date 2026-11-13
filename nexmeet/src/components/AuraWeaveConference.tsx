@@ -605,7 +605,31 @@ export default function AuraWeaveConference({
             </div>
           )}
           {/* Participant video grid */}
-          <div className={`auraweave-grid ${gridClass}`}>
+          {/* Layout selector and hide self view toggle */}
+        <div className="meeting-controls top-right flex items-center space-x-2 mb-2">
+          {/* Layout selector */}
+          <select
+            value={layoutMode}
+            onChange={(e) => setLayoutMode(e.target.value as any)}
+            className="rounded border p-1 text-sm"
+            aria-label="Layout selector"
+          >
+            <option value="gallery">Gallery</option>
+            <option value="focus">Focus</option>
+            <option value="speaker">Speaker</option>
+            <option value="pip">Picture‑in‑Picture</option>
+            <option value="screenShare">Screen‑share</option>
+          </select>
+          {/* Hide self view toggle */}
+          <button
+            onClick={() => setShowSelf(!showSelf)}
+            className="rounded bg-gray-200 p-1 text-sm"
+            aria-label="Toggle self view"
+          >
+            {showSelf ? "Hide Me" : "Show Me"}
+          </button>
+        </div>
+        <div className={`auraweave-grid ${gridClass}`}>
             {(() => {
               if (gridClass === "layout-screen-share" && hasScreenShare) {
                 return (
