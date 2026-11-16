@@ -140,6 +140,7 @@ export function useAuraWeave({
   const localStreamRef = useRef<MediaStream>(new MediaStream());
   const incomingChunksRef = useRef(new Map<string, {chunks: string[]; total: number}>());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const refreshingTokenRef = useRef(false);
 
   const syncLocal = useCallback(() => {
     const stream = participantStream(room.localParticipant, localStreamRef.current);
@@ -293,6 +294,7 @@ export function useAuraWeave({
             syncPeers();
           })
           .on(RoomEvent.Disconnected, () => {
+            if (refreshingTokenRef.current) return;
             setConnected(false);
             setConnectionStatus('disconnected');
           })
@@ -338,6 +340,7 @@ export function useAuraWeave({
 
             // Reconnect before the two-hour token expires. Keeping tracks alive
             // avoids ending the meeting when LiveKit rotates the credentials.
+            refreshingTokenRef.current = true;
             await room.disconnect(false);
             await room.connect(refreshed.url, refreshed.token);
             await room.localParticipant.setMicrophoneEnabled(microphoneEnabled);
@@ -348,12 +351,15 @@ export function useAuraWeave({
             syncLocal();
             syncPeers();
           } catch (refreshError) {
+            setConnected(false);
             setConnectionStatus('reconnecting');
             setError(
               refreshError instanceof Error
                 ? `Meeting token refresh failed: ${refreshError.message}`
                 : "Meeting token refresh failed."
             );
+          } finally {
+            refreshingTokenRef.current = false;
           }
         };
 
