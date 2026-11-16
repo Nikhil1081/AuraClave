@@ -373,49 +373,49 @@ app.patch("/api/room/:roomName/settings", async (req: Request, res: Response) =>
       waitingRoomEnabled: updated.waitingRoomEnabled,
       waitingCount: updated.waitingList.size
     });
-
-    app.post("/api/room/:roomName/moderation/remove", async (req: Request, res: Response) => {
-      try {
-        const user = await getAuthenticatedUser(req);
-        const roomName = String(req.params.roomName);
-        const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
-        if (!participantId) return res.status(400).json({ error: "A participant is required." });
-        await requireRoomHost(roomName, user.id);
-        await getLiveKitRoomService().removeParticipant(roomName, participantId);
-        return res.status(200).json({ success: true });
-      } catch (err: any) {
-        const message = err?.message || "Unable to remove participant.";
-        return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
-      }
-    });
-
-    app.post("/api/room/:roomName/moderation/mute", async (req: Request, res: Response) => {
-      try {
-        const user = await getAuthenticatedUser(req);
-        const roomName = String(req.params.roomName);
-        const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
-        let trackSid = typeof req.body?.trackSid === "string" ? req.body.trackSid.trim() : "";
-        if (!participantId) {
-          return res.status(400).json({ error: "A participant is required." });
-        }
-        await requireRoomHost(roomName, user.id);
-        const roomService = getLiveKitRoomService();
-        if (!trackSid) {
-          const participant = await roomService.getParticipant(roomName, participantId);
-          trackSid = participant.tracks.find((track) => track.source === 2)?.sid || "";
-        }
-        if (!trackSid) {
-          return res.status(400).json({ error: "The participant has no active microphone track." });
-        }
-        await roomService.mutePublishedTrack(roomName, participantId, trackSid, true);
-        return res.status(200).json({ success: true });
-      } catch (err: any) {
-        const message = err?.message || "Unable to mute participant.";
-        return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
-      }
-    });
   } catch (err: any) {
     return res.status(401).json({ error: err?.message || "Authentication failed." });
+  }
+});
+
+app.post("/api/room/:roomName/moderation/remove", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
+    if (!participantId) return res.status(400).json({ error: "A participant is required." });
+    await requireRoomHost(roomName, user.id);
+    await getLiveKitRoomService().removeParticipant(roomName, participantId);
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    const message = err?.message || "Unable to remove participant.";
+    return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
+  }
+});
+
+app.post("/api/room/:roomName/moderation/mute", async (req: Request, res: Response) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomName = String(req.params.roomName);
+    const participantId = typeof req.body?.participantId === "string" ? req.body.participantId.trim() : "";
+    let trackSid = typeof req.body?.trackSid === "string" ? req.body.trackSid.trim() : "";
+    if (!participantId) {
+      return res.status(400).json({ error: "A participant is required." });
+    }
+    await requireRoomHost(roomName, user.id);
+    const roomService = getLiveKitRoomService();
+    if (!trackSid) {
+      const participant = await roomService.getParticipant(roomName, participantId);
+      trackSid = participant.tracks.find((track) => track.source === 2)?.sid || "";
+    }
+    if (!trackSid) {
+      return res.status(400).json({ error: "The participant has no active microphone track." });
+    }
+    await roomService.mutePublishedTrack(roomName, participantId, trackSid, true);
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    const message = err?.message || "Unable to mute participant.";
+    return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
   }
 });
 
