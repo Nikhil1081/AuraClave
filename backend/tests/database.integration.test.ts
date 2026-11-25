@@ -496,7 +496,8 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
       db
     );
 
-    const vault = new EphemeralSuccessorVault();
+    const vaultKey = crypto.randomBytes(32);
+    const vault = new EphemeralSuccessorVault(vaultKey, new InMemoryTransientStore());
     const sessionService = new SessionService(db, vault);
 
     try {

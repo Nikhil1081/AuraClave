@@ -32,12 +32,13 @@ export class EphemeralSuccessorVault {
   private vaultKey: Buffer;
   private store: ITransientStore;
 
-  constructor(vaultKey: Buffer, store: ITransientStore) {
-    if (vaultKey.length !== 32) {
+  constructor(vaultKey?: Buffer, store?: ITransientStore) {
+    const key = vaultKey || crypto.randomBytes(32);
+    if (key.length !== 32) {
       throw new Error("Vault key must be exactly 32 bytes for AES-256-GCM.");
     }
-    this.vaultKey = vaultKey;
-    this.store = store;
+    this.vaultKey = key;
+    this.store = store || new InMemoryTransientStore();
   }
 
   /**
