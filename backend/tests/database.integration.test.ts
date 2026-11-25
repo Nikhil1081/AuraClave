@@ -6,6 +6,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabaseConnection, type IdentityDatabase } from "../src/database/client.js";
 import {
   authAuditEvents,
+  authRefreshTokens,
+  authSessionFamilies,
   authSessions,
   emailVerificationTokens,
   passwordResetTokens,
@@ -29,6 +31,9 @@ import {
   revokeAuthSession,
   updateIdentityUserProfile,
 } from "../src/repositories/postgres-identity-repository.js";
+import { SessionService } from "../src/repositories/session-service.js";
+import { EphemeralSuccessorVault } from "../src/auth/successor-vault.js";
+import { AuthErrorCode } from "../src/auth/errors.js";
 import { eq, inArray, sql } from "drizzle-orm";
 import { migrateLegacyIdentityUsers } from "../src/migrations/json-identity-migration.js";
 
@@ -471,6 +476,104 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
       }
     } finally {
       await db.delete(users).where(inArray(users.id, [firstId, secondId]));
+    }
+  });
+
+  it("manages dedicated session families, refresh rotation, idempotent retries, and replay detection", async () => {
+    if (!database) {
+      throw new Error("PostgreSQL integration test connection was not initialized.");
+    }
+
+    const db = database;
+    const testUserId = randomUUID();
+    await createIdentityUser(
+      {
+        id: testUserId,
+        email: `session-test-${testUserId}@example.test`,
+        passwordHash: "$2b$10$test-session-hash-only",
+        fullName: "Session Test User",
+      },
+      db
+    );
+
+    const vault = new EphemeralSuccessorVault();
+    const sessionService = new SessionService(db, vault);
+
+    try {
+      // 1. Create session family
+      const absoluteExpiry = new Date(Date.now() + 30 * 86400 * 1000); // 30 days
+      const { familyId, rawRefreshToken: token1 } = await sessionService.createSessionFamily({
+        userId: testUserId,
+        absoluteExpiresAt: absoluteExpiry,
+        deviceLabel: "Chrome on macOS",
+        initialIpAddress: "127.0.0.1",
+        initialUserAgent: "Mozilla/5.0",
+      });
+
+      expect(familyId).toBeDefined();
+      expect(token1).toBeDefined();
+
+      const [storedFamily] = await db
+        .select()
+        .from(authSessionFamilies)
+        .where(eq(authSessionFamilies.id, familyId));
+      expect(storedFamily).toBeDefined();
+      expect(storedFamily.userId).toBe(testUserId);
+      expect(storedFamily.deviceLabel).toBe("Chrome on macOS");
+
+      // 2. Rotate refresh token with idempotency key
+      const idemKey = randomUUID();
+      const rotation1 = await sessionService.rotateRefreshToken({
+        rawRefreshToken: token1,
+        idempotencyKey: idemKey,
+      });
+
+      expect(rotation1.isRetry).toBe(false);
+      expect(rotation1.familyId).toBe(familyId);
+      expect(rotation1.rawRefreshToken).toBeDefined();
+      expect(rotation1.rawRefreshToken).not.toBe(token1);
+
+      const token2 = rotation1.rawRefreshToken;
+
+      // 3. Lost-response retry with SAME token1 and SAME idempotency key within 30s
+      const retryResult = await sessionService.rotateRefreshToken({
+        rawRefreshToken: token1,
+        idempotencyKey: idemKey,
+      });
+
+      expect(retryResult.isRetry).toBe(true);
+      expect(retryResult.rawRefreshToken).toBe(token2); // Re-issued identical successor!
+
+      // 4. Replay attack attempt: presenting already-consumed token1 with DIFFERENT idempotency key (or none)
+      let replayError: any;
+      try {
+        await sessionService.rotateRefreshToken({
+          rawRefreshToken: token1,
+          idempotencyKey: "different-attacker-idem-key",
+        });
+      } catch (err: any) {
+        replayError = err;
+      }
+
+      expect(replayError).toBeDefined();
+      expect(replayError.code).toBe(AuthErrorCode.REFRESH_TOKEN_REUSE);
+
+      // Verify entire family is revoked due to replay detection!
+      const [revokedFamily] = await db
+        .select()
+        .from(authSessionFamilies)
+        .where(eq(authSessionFamilies.id, familyId));
+      expect(revokedFamily.revokedAt).not.toBeNull();
+      expect(revokedFamily.revokedReason).toBe("replay_detected");
+
+      // 5. Successor token2 must now also be rejected because family is revoked
+      await expect(
+        sessionService.rotateRefreshToken({
+          rawRefreshToken: token2,
+        })
+      ).rejects.toMatchObject({ code: AuthErrorCode.REVOKED_TOKEN });
+    } finally {
+      await db.delete(users).where(eq(users.id, testUserId));
     }
   });
 });

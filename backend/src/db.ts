@@ -17,16 +17,26 @@ export interface UserRecord {
 }
 
 const DATA_DIR = path.resolve(__dirname, "../data");
-const DB_FILE = path.join(DATA_DIR, "users.json");
+function getDbFile(): string {
+  if (process.env.USERS_JSON_PATH?.trim()) {
+    return path.resolve(process.env.USERS_JSON_PATH.trim());
+  }
+  return path.join(DATA_DIR, "users.json");
+}
 
 let memoryCache: Map<string, UserRecord> | null = null;
+
+export function resetDbCache(): void {
+  memoryCache = null;
+}
 
 async function ensureDb(): Promise<Map<string, UserRecord>> {
   if (memoryCache) return memoryCache;
 
+  const dbFile = getDbFile();
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const content = await fs.readFile(DB_FILE, "utf-8");
+    await fs.mkdir(path.dirname(dbFile), { recursive: true });
+    const content = await fs.readFile(dbFile, "utf-8");
     const list: UserRecord[] = JSON.parse(content);
     memoryCache = new Map(list.map(u => [u.email.toLowerCase(), u]));
   } catch (err: any) {
@@ -44,11 +54,12 @@ async function ensureDb(): Promise<Map<string, UserRecord>> {
 
 async function persist() {
   if (!memoryCache) return;
+  const dbFile = getDbFile();
   const list = Array.from(memoryCache.values());
-  const tempFile = `${DB_FILE}.${Date.now()}.tmp`;
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tempFile = `${dbFile}.${Date.now()}.${Math.random().toString(36).substring(7)}.tmp`;
+  await fs.mkdir(path.dirname(dbFile), { recursive: true });
   await fs.writeFile(tempFile, JSON.stringify(list, null, 2), "utf-8");
-  await fs.rename(tempFile, DB_FILE);
+  await fs.rename(tempFile, dbFile);
 }
 
 export async function findUserByEmail(email: string): Promise<UserRecord | null> {
@@ -117,4 +128,28 @@ export async function updateUserProfile(
 
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
+}
+
+/**
+ * Atomically updates a user's password hash using compare-and-swap semantics (conditioned on previous hash).
+ * Prevents race conditions or overwriting concurrent password changes.
+ */
+export async function upgradeUserPasswordHash(
+  userId: string,
+  expectedPriorHash: string,
+  newHash: string
+): Promise<boolean> {
+  const cache = await ensureDb();
+  const user = await findUserById(userId);
+  if (!user) return false;
+
+  // Compare-and-swap check
+  if (user.passwordHash !== expectedPriorHash) {
+    return false;
+  }
+
+  user.passwordHash = newHash;
+  cache.set(user.email.toLowerCase(), user);
+  await persist();
+  return true;
 }

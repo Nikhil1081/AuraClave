@@ -75,6 +75,67 @@ export const authSessions = pgTable(
   ],
 );
 
+export const authSessionFamilies = pgTable(
+  "auth_session_families",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    absoluteExpiresAt: timestamp("absolute_expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    revokedReason: text("revoked_reason"),
+    deviceLabel: text("device_label"),
+    initialIpAddress: inet("initial_ip_address"),
+    initialUserAgent: text("initial_user_agent"),
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("auth_session_families_user_id_idx").on(table.userId),
+    index("auth_session_families_expiry_idx").on(table.absoluteExpiresAt),
+    check(
+      "auth_session_families_expiry_after_creation",
+      sql`${table.absoluteExpiresAt} > ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const authRefreshTokens = pgTable(
+  "auth_refresh_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => authSessionFamilies.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    parentTokenId: uuid("parent_token_id").references(
+      (): AnyPgColumn => authRefreshTokens.id,
+      { onDelete: "set null" },
+    ),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    idempotencyKey: text("idempotency_key"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("auth_refresh_tokens_hash_unique").on(table.tokenHash),
+    index("auth_refresh_tokens_family_id_idx").on(table.familyId),
+    index("auth_refresh_tokens_parent_token_idx").on(table.parentTokenId),
+    index("auth_refresh_tokens_expiry_idx").on(table.expiresAt),
+    check(
+      "auth_refresh_tokens_expiry_after_creation",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  ],
+);
+
 export const emailVerificationTokens = pgTable(
   "email_verification_tokens",
   {
@@ -146,6 +207,8 @@ export const authAuditEvents = pgTable(
 export const identitySchema = {
   users,
   authSessions,
+  authSessionFamilies,
+  authRefreshTokens,
   emailVerificationTokens,
   passwordResetTokens,
   authAuditEvents,
