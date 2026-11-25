@@ -123,7 +123,7 @@ export class SessionService {
     }
 
     // 2. Perform transactional rotation
-    return await this.database.transaction(async (tx) => {
+    const result = await this.database.transaction(async (tx) => {
       // Find token record
       const [tokenRecord] = await tx
         .select()
@@ -169,15 +169,15 @@ export class SessionService {
 
       // 3. REPLAY DETECTION: Token already consumed!
       if (tokenRecord.consumedAt) {
-        // Replay confirmed! Revoke entire family immediately in a dedicated write
+        // Mark family revoked inside this transaction
         const revokeReason = "replay_detected";
-        await this.database
+        await tx
           .update(authSessionFamilies)
           .set({ revokedAt: new Date(), revokedReason: revokeReason })
           .where(eq(authSessionFamilies.id, family.id));
 
-        // Audit event
-        await this.database.insert(authAuditEvents).values({
+        // Audit event inside transaction
+        await tx.insert(authAuditEvents).values({
           userId: family.userId,
           eventType: "refresh_token_replay",
           succeeded: false,
@@ -190,10 +190,11 @@ export class SessionService {
           },
         });
 
-        throw new AuthError(
-          AuthErrorCode.REFRESH_TOKEN_REUSE,
-          "Presented refresh token has already been consumed (theft suspected)"
-        );
+        // Return a signal to commit transaction and then throw AuthError outside
+        return {
+          isReplay: true,
+          familyId: family.id,
+        };
       }
 
       // Check token expiration
@@ -250,24 +251,39 @@ export class SessionService {
         metadata: { familyId: family.id },
       });
 
-      // 6. Cache successor in vault for 30s idempotent retry
-      if (params.idempotencyKey) {
-        await this.successorVault.storeSuccessor(
-          presentedHash,
-          params.idempotencyKey,
-          rawSuccessorToken,
-          family.id,
-          30
-        );
-      }
-
       return {
+        isReplay: false,
         rawRefreshToken: rawSuccessorToken,
         familyId: family.id,
         userId: family.userId,
         isRetry: false,
       };
     });
+
+    if (result.isReplay) {
+      throw new AuthError(
+        AuthErrorCode.REFRESH_TOKEN_REUSE,
+        "Presented refresh token has already been consumed (theft suspected)"
+      );
+    }
+
+    // 6. Cache successor in vault for 30s idempotent retry
+    if (params.idempotencyKey && result.rawRefreshToken) {
+      await this.successorVault.storeSuccessor(
+        presentedHash,
+        params.idempotencyKey,
+        result.rawRefreshToken,
+        result.familyId,
+        30
+      );
+    }
+
+    return {
+      rawRefreshToken: result.rawRefreshToken!,
+      familyId: result.familyId,
+      userId: result.userId!,
+      isRetry: false,
+    };
   }
 
   /**
