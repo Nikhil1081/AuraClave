@@ -169,15 +169,15 @@ export class SessionService {
 
       // 3. REPLAY DETECTION: Token already consumed!
       if (tokenRecord.consumedAt) {
-        // Replay confirmed! Revoke entire family immediately
+        // Replay confirmed! Revoke entire family immediately in a dedicated write
         const revokeReason = "replay_detected";
-        await tx
+        await this.database
           .update(authSessionFamilies)
           .set({ revokedAt: new Date(), revokedReason: revokeReason })
           .where(eq(authSessionFamilies.id, family.id));
 
         // Audit event
-        await tx.insert(authAuditEvents).values({
+        await this.database.insert(authAuditEvents).values({
           userId: family.userId,
           eventType: "refresh_token_replay",
           succeeded: false,
