@@ -90,14 +90,14 @@ describe("M1.4.1 Authentication Configuration", () => {
         REDIS_URL: "redis://127.0.0.1:6379",
         SUCCESSOR_VAULT_ENCRYPTION_KEY: "short",
       })
-    ).toThrow("SUCCESSOR_VAULT_ENCRYPTION_KEY must be at least 32 characters");
+    ).toThrow(/Invalid SUCCESSOR_VAULT_ENCRYPTION_KEY/);
 
     const validProd = parseAuthConfig({
       NODE_ENV: "production",
       JWT_SECRET: "test-secret-at-least-32-chars-long-for-testing",
       ENABLE_REFRESH_SESSIONS: "true",
       REDIS_URL: "redis://prod-redis.internal:6379",
-      SUCCESSOR_VAULT_ENCRYPTION_KEY: "01234567890123456789012345678901",
+      SUCCESSOR_VAULT_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     });
     expect(validProd.REDIS_URL).toBe("redis://prod-redis.internal:6379");
   });

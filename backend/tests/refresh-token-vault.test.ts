@@ -149,3 +149,87 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     expect(retrieved).toBeNull(); // Fails closed without throwing or crashing API
   });
 });
+
+  it("proves production configuration fails closed when required infrastructure is absent", () => {
+    const { createSuccessorVaultFromConfig } = require("../src/auth/successor-vault.js");
+    expect(() =>
+      createSuccessorVaultFromConfig({
+        NODE_ENV: "production",
+        ENABLE_REFRESH_SESSIONS: true,
+      })
+    ).toThrow(/Production refresh-session functionality requires REDIS_URL/);
+
+    expect(() =>
+      createSuccessorVaultFromConfig({
+        NODE_ENV: "production",
+        ENABLE_REFRESH_SESSIONS: true,
+        REDIS_URL: "redis://127.0.0.1:6379",
+        SUCCESSOR_VAULT_ENCRYPTION_KEY: "short",
+      })
+    ).toThrow(/Invalid encryption key encoding/);
+  });
+import { describe, expect, it } from "vitest";
+import {
+  encryptPayload,
+  decryptPayload,
+  parseEncryptionKey,
+} from "../src/auth/crypto.js";
+
+describe("M1.4 Cryptographic Key Parsing and AES-256-GCM Integrity", () => {
+  it("parses valid 64-character hex keys into exactly 32 bytes", () => {
+    const hexKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const parsed = parseEncryptionKey(hexKey);
+    expect(Buffer.isBuffer(parsed)).toBe(true);
+    expect(parsed.length).toBe(32);
+    expect(parsed.toString("hex")).toBe(hexKey);
+  });
+
+  it("parses valid 44-character base64 keys into exactly 32 bytes", () => {
+    const base64Key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+    const parsed = parseEncryptionKey(base64Key);
+    expect(Buffer.isBuffer(parsed)).toBe(true);
+    expect(parsed.length).toBe(32);
+  });
+
+  it("strictly rejects truncated or undersized keys without padding or truncating", () => {
+    const shortHex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
+    expect(() => parseEncryptionKey(shortHex)).toThrow(/Invalid encryption key encoding/);
+    expect(() => parseEncryptionKey("short-secret-key")).toThrow(/Invalid encryption key encoding/);
+  });
+
+  it("strictly rejects oversized keys without truncation", () => {
+    const longHex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef00";
+    expect(() => parseEncryptionKey(longHex)).toThrow(/Invalid encryption key encoding/);
+  });
+
+  it("strictly rejects weak placeholder keys", () => {
+    const weakZeroes = "0000000000000000000000000000000000000000000000000000000000000000";
+    expect(() => parseEncryptionKey(weakZeroes)).toThrow(/weak placeholder/);
+
+    const weakSequence = "1234567890123456789012345678901234567890123456789012345678901234";
+    expect(() => parseEncryptionKey(weakSequence)).toThrow(/weak placeholder/);
+
+    const weakBase64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    expect(() => parseEncryptionKey(weakBase64)).toThrow(/weak placeholder/);
+  });
+
+  it("encrypts and decrypts with Authenticated Associated Data (AAD)", () => {
+    const key = parseEncryptionKey("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    const plaintext = JSON.stringify({ token: "successor-secret", familyId: "fam-1" });
+    const aad = "aad:tokenHash123:fam-1:idemKey456";
+
+    const encrypted = encryptPayload(plaintext, key, aad);
+    expect(encrypted.iv).toHaveLength(24);
+    expect(encrypted.authTag).toHaveLength(32);
+
+    // Decrypt with matching AAD succeeds
+    const decrypted = decryptPayload(encrypted, key, aad);
+    expect(decrypted).toBe(plaintext);
+
+    // Decrypt with mismatched AAD fails (cryptographic integrity rejection)
+    expect(() => decryptPayload(encrypted, key, "aad:mismatched:fam-1:idemKey")).toThrow();
+
+    // Decrypt with no AAD fails
+    expect(() => decryptPayload(encrypted, key)).toThrow();
+  });
+});

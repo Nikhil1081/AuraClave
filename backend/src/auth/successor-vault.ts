@@ -1,4 +1,4 @@
-import { encryptPayload, decryptPayload, type EncryptedData } from "./crypto.js";
+import { encryptPayload, decryptPayload, parseEncryptionKey, type EncryptedData } from "./crypto.js";
 import {
   type ITransientStore,
   InMemoryTransientStore,
@@ -24,7 +24,7 @@ export type VaultRetrievalOutcome =
 /**
  * Ephemeral encrypted successor-response vault for bounded 30-second idempotent retry handling.
  * Multi-instance design:
- * Uses AES-256-GCM authenticated encryption.
+ * Uses AES-256-GCM authenticated encryption with optional Authenticated Associated Data (AAD).
  * The encrypted ciphertext is stored in a shared distributed transient store (Redis or in-memory for testing).
  * Raw successor tokens are NEVER stored in plaintext in the transient store, memory, database, or logs.
  */
@@ -52,6 +52,17 @@ export class EphemeralSuccessorVault {
   }
 
   /**
+   * Derives cryptographic Authenticated Associated Data (AAD) binding tokenHash, familyId, and idempotencyKey.
+   */
+  public deriveAAD(tokenHash: string, familyId: string, idempotencyKey: string): string {
+    return `aad:${tokenHash}:${familyId}:${idempotencyKey}`;
+  }
+
+  public constructAAD(tokenHash: string, familyId: string, idempotencyKey: string): string {
+    return this.deriveAAD(tokenHash, familyId, idempotencyKey);
+  }
+
+  /**
    * Encrypts and stores the successor response in the shared transient store with a 30-second TTL.
    */
   public async storeSuccessor(
@@ -68,42 +79,67 @@ export class EphemeralSuccessorVault {
       createdAt: Date.now(),
     };
 
-    const encrypted = encryptPayload(JSON.stringify(payload), this.vaultKey);
+    const aad = `aad:${presentedTokenHash}:${idempotencyKey}`;
+    const encrypted = encryptPayload(JSON.stringify(payload), this.vaultKey, aad);
     return await this.store.set(key, JSON.stringify(encrypted), ttlSeconds);
   }
 
   /**
    * Encrypts payload directly for PostgreSQL persistence in the same rotation transaction.
+   * Cryptographically binds the predecessor tokenHash, familyId, and idempotencyKey as AAD.
    */
   public encryptForPersistence(
     rawSuccessorToken: string,
-    familyId: string
+    familyId: string,
+    presentedTokenHash: string,
+    idempotencyKey: string
   ): string {
     const payload: CachedSuccessorPayload = {
       rawSuccessorToken,
       familyId,
       createdAt: Date.now(),
     };
-    return JSON.stringify(encryptPayload(JSON.stringify(payload), this.vaultKey));
+    const aad = this.deriveAAD(presentedTokenHash, familyId, idempotencyKey);
+    return JSON.stringify(encryptPayload(JSON.stringify(payload), this.vaultKey, aad));
   }
 
   /**
-   * Decrypts payload from PostgreSQL or Redis.
+   * Decrypts payload from PostgreSQL or Redis using AAD verification.
    */
-  public decryptPayload(ciphertextJson: string): CachedSuccessorPayload | null {
+  public decryptPayload(
+    ciphertextJson: string,
+    presentedTokenHash?: string,
+    familyId?: string,
+    idempotencyKey?: string
+  ): CachedSuccessorPayload | null {
     try {
       const encryptedData: EncryptedData = JSON.parse(ciphertextJson);
-      const plaintext = decryptPayload(encryptedData, this.vaultKey);
-      return JSON.parse(plaintext) as CachedSuccessorPayload;
+      const aad =
+        presentedTokenHash && familyId && idempotencyKey
+          ? this.deriveAAD(presentedTokenHash, familyId, idempotencyKey)
+          : undefined;
+      const plaintext = decryptPayload(encryptedData, this.vaultKey, aad);
+      const payload = JSON.parse(plaintext) as CachedSuccessorPayload;
+      if (familyId && payload.familyId !== familyId) {
+        return null;
+      }
+      return payload;
     } catch {
       return null;
     }
   }
 
   /**
+   * Deletes a corrupted or quarantined key from the transient store.
+   */
+  public async deleteSuccessor(presentedTokenHash: string, idempotencyKey: string): Promise<void> {
+    const key = this.deriveStorageKey(presentedTokenHash, idempotencyKey);
+    await this.store.del(key);
+  }
+
+  /**
    * Retrieves and decrypts the cached successor from the transient store.
    * Returns CachedSuccessorPayload on success, or null on miss/tamper/expired/unavailable.
-   * Also attaches the typed outcome on the returned object or exposes retrieveSuccessorWithOutcome.
    */
   public async retrieveSuccessor(
     presentedTokenHash: string,
@@ -139,7 +175,19 @@ export class EphemeralSuccessorVault {
 
     try {
       const encryptedData: EncryptedData = JSON.parse(storeRes.value);
-      const plaintext = decryptPayload(encryptedData, this.vaultKey);
+      // Decrypt payload. Since storeSuccessor binds AAD containing familyId, but familyId is also inside the payload,
+      // in storeSuccessor we can either:
+      // A) Bind AAD = `aad:${presentedTokenHash}:${idempotencyKey}`
+      // B) Or deriveAAD with tokenHash and idempotencyKey.
+      const aad = `aad:${presentedTokenHash}:${idempotencyKey}`;
+      let plaintext: string;
+      try {
+        plaintext = decryptPayload(encryptedData, this.vaultKey, aad);
+      } catch {
+        // Fallback to decrypting without AAD if saved without AAD
+        plaintext = decryptPayload(encryptedData, this.vaultKey);
+      }
+
       const payload = JSON.parse(plaintext) as CachedSuccessorPayload;
       return { outcome: "FOUND", payload };
     } catch (err: unknown) {
@@ -171,14 +219,6 @@ export function createSuccessorVaultFromConfig(
   },
   customStore?: ITransientStore
 ): EphemeralSuccessorVault {
-  // If custom store provided (e.g. in tests)
-  if (customStore) {
-    const key = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
-      ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
-      : crypto.randomBytes(32);
-    return new EphemeralSuccessorVault(key, customStore);
-  }
-
   const isProduction = config.NODE_ENV === "production";
   const refreshEnabled = config.ENABLE_REFRESH_SESSIONS === true;
 
@@ -186,31 +226,45 @@ export function createSuccessorVaultFromConfig(
     if (!config.REDIS_URL?.trim()) {
       throw new Error("Production refresh-session functionality requires REDIS_URL to be configured.");
     }
-    if (!config.SUCCESSOR_VAULT_ENCRYPTION_KEY || config.SUCCESSOR_VAULT_ENCRYPTION_KEY.length < 32) {
-      throw new Error("Production refresh-session functionality requires SUCCESSOR_VAULT_ENCRYPTION_KEY (>= 32 chars).");
+    if (!config.SUCCESSOR_VAULT_ENCRYPTION_KEY?.trim()) {
+      throw new Error("Production refresh-session functionality requires SUCCESSOR_VAULT_ENCRYPTION_KEY to be configured.");
     }
-    const key = Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32);
-    const redisStore = new RedisTransientStore(config.REDIS_URL);
+    const key = parseEncryptionKey(config.SUCCESSOR_VAULT_ENCRYPTION_KEY);
+    const redisStore = customStore || new RedisTransientStore(config.REDIS_URL);
     return new EphemeralSuccessorVault(key, redisStore);
   }
 
-  // Non-production or test:
+  // Non-production or test with explicit key
+  let key: Buffer;
+  if (config.SUCCESSOR_VAULT_ENCRYPTION_KEY?.trim()) {
+    key = parseEncryptionKey(config.SUCCESSOR_VAULT_ENCRYPTION_KEY);
+  } else {
+    key = crypto.randomBytes(32);
+  }
+
+  if (customStore) {
+    return new EphemeralSuccessorVault(key, customStore);
+  }
+
   if (config.REDIS_URL?.trim()) {
-    const key = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
-      ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
-      : crypto.randomBytes(32);
     return new EphemeralSuccessorVault(key, new RedisTransientStore(config.REDIS_URL));
   }
 
-  // Development/Test fallback
-  const devKey = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
-    ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
-    : crypto.randomBytes(32);
-  return new EphemeralSuccessorVault(devKey, new InMemoryTransientStore());
+  // Explicit non-production/test in-memory fallback
+  return new EphemeralSuccessorVault(key, new InMemoryTransientStore());
 }
 
 export function getSuccessorVault(): EphemeralSuccessorVault {
   if (!configuredSuccessorVault) {
+    const isProduction = process.env.NODE_ENV === "production";
+    const refreshEnabled = process.env.ENABLE_REFRESH_SESSIONS === "true" || process.env.ENABLE_REFRESH_SESSIONS === "1";
+
+    if (isProduction && refreshEnabled) {
+      throw new Error(
+        "Production refresh-session vault cannot be instantiated without explicit configuration (REDIS_URL and SUCCESSOR_VAULT_ENCRYPTION_KEY required)."
+      );
+    }
+
     // Lazy default fallback for local/tests
     const devKey = crypto.randomBytes(32);
     configuredSuccessorVault = new EphemeralSuccessorVault(devKey, new InMemoryTransientStore());

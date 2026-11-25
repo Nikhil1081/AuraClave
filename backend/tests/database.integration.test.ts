@@ -558,6 +558,50 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
       expect(dbRetryResult.isRetry).toBe(true);
       expect(dbRetryResult.rawRefreshToken).toBe(token2); // Successfully recovered from PostgreSQL authoritative record!
 
+      // 3c. Verify corrupted database ciphertext fails closed with internal integrity failure WITHOUT revoking family
+      const corruptedFamily = await sessionService.createSessionFamily({
+        userId: testUserId,
+        absoluteExpiresAt: absoluteExpiry,
+      });
+      const corruptedIdemKey = randomUUID();
+      const corruptedRot = await sessionService.rotateRefreshToken({
+        rawRefreshToken: corruptedFamily.rawRefreshToken,
+        idempotencyKey: corruptedIdemKey,
+      });
+
+      // Corrupt the DB encrypted_successor_payload
+      await db
+        .update(authRefreshTokens)
+        .set({
+          encryptedSuccessorPayload: JSON.stringify({
+            iv: "000000000000000000000000",
+            authTag: "00000000000000000000000000000000",
+            data: "abcdef",
+          }),
+        })
+        .where(
+          eq(
+            authRefreshTokens.tokenHash,
+            (await import("../src/auth/refresh-token.js")).hashRefreshToken(
+              corruptedFamily.rawRefreshToken
+            )
+          )
+        );
+
+      // Attempt retry with corrupted DB payload: must fail closed without revoking family
+      await expect(
+        sessionServiceWithEmptyVault.rotateRefreshToken({
+          rawRefreshToken: corruptedFamily.rawRefreshToken,
+          idempotencyKey: corruptedIdemKey,
+        })
+      ).rejects.toMatchObject({ code: AuthErrorCode.INTERNAL_AUTH_FAILURE });
+
+      const [unrevokedRecord] = await db
+        .select()
+        .from(authSessionFamilies)
+        .where(eq(authSessionFamilies.id, corruptedFamily.familyId));
+      expect(unrevokedRecord.revokedAt).toBeNull(); // Family is NOT revoked solely due to corrupted ciphertext!
+
       // 4. Replay attack attempt: presenting already-consumed token1 with DIFFERENT idempotency key (or none)
       let replayError: any;
       try {

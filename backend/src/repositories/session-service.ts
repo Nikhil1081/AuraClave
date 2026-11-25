@@ -120,11 +120,27 @@ export class SessionService {
           };
         }
       } else if (cached.outcome === "INVALID") {
-        // Corrupted ciphertext / tampering detected in Redis: log audit and fail closed
-        throw new AuthError(
-          AuthErrorCode.INVALID_TOKEN,
-          `Tampered successor response payload detected: ${cached.error || "MAC verification failed"}`
-        );
+        // Corrupted ciphertext / tampering detected in Redis: quarantine/delete corrupted entry and audit
+        try {
+          await this.successorVault.deleteSuccessor(presentedHash, params.idempotencyKey);
+        } catch {}
+
+        try {
+          await this.database.insert(authAuditEvents).values({
+            eventType: "transient_cache_corruption",
+            succeeded: false,
+            ipAddress: params.ipAddress,
+            userAgent: params.userAgent,
+            metadata: {
+              tokenHash: presentedHash,
+              idempotencyKey: params.idempotencyKey,
+              error: cached.error || "MAC verification failed",
+            },
+          });
+        } catch {}
+
+        // Do NOT fail closed with INVALID_TOKEN or revoke family!
+        // Proceed to authoritative PostgreSQL transaction recovery!
       }
       // If NOT_FOUND, EXPIRED, or UNAVAILABLE: proceed to authoritative PostgreSQL transaction!
     }
@@ -180,23 +196,60 @@ export class SessionService {
         if (
           params.idempotencyKey &&
           tokenRecord.idempotencyKey === params.idempotencyKey &&
-          tokenRecord.encryptedSuccessorPayload &&
-          tokenRecord.retryExpiresAt &&
-          new Date() <= tokenRecord.retryExpiresAt
+          tokenRecord.encryptedSuccessorPayload
         ) {
-          // Decrypt authoritative payload
-          const recovered = this.successorVault.decryptPayload(
-            tokenRecord.encryptedSuccessorPayload
-          );
-          if (recovered) {
-            return {
-              isReplay: false,
-              isRetry: true,
-              rawRefreshToken: recovered.rawSuccessorToken,
-              familyId: family.id,
-              userId: family.userId,
-            };
+          // Check if retry window has expired
+          if (tokenRecord.retryExpiresAt && new Date() > tokenRecord.retryExpiresAt) {
+            throw new AuthError(
+              AuthErrorCode.EXPIRED_TOKEN,
+              "Idempotent retry window of 30 seconds has expired"
+            );
           }
+
+          // AAD binding verification: tokenHash + familyId + idempotencyKey
+          const aad = this.successorVault.constructAAD(
+            presentedHash,
+            family.id,
+            params.idempotencyKey
+          );
+
+          const recovered = this.successorVault.decryptPayload(
+            tokenRecord.encryptedSuccessorPayload,
+            aad
+          );
+
+          if (recovered) {
+            // Verify internal binding in decrypted payload matches database record
+            if (recovered.familyId === family.id) {
+              return {
+                isReplay: false,
+                isRetry: true,
+                rawRefreshToken: recovered.rawSuccessorToken,
+                familyId: family.id,
+                userId: family.userId,
+              };
+            }
+          }
+
+          // If decryption fails (e.g. corrupted ciphertext in DB or key issue):
+          // Fail closed with internal error; DO NOT interpret as token theft or revoke family!
+          await tx.insert(authAuditEvents).values({
+            userId: family.userId,
+            eventType: "db_retry_payload_corrupted",
+            succeeded: false,
+            ipAddress: params.ipAddress,
+            userAgent: params.userAgent,
+            metadata: {
+              familyId: family.id,
+              tokenId: tokenRecord.id,
+              idempotencyKey: params.idempotencyKey,
+            },
+          });
+
+          throw new AuthError(
+            AuthErrorCode.AUTH_DATABASE_UNAVAILABLE,
+            "Stored retry record integrity failure. Family not revoked."
+          );
         }
 
         // Replay confirmed! Mark family revoked inside this transaction
@@ -249,12 +302,14 @@ export class SessionService {
       if (params.idempotencyKey) {
         encryptedSuccessorPayload = this.successorVault.encryptForPersistence(
           rawSuccessorToken,
-          family.id
+          family.id,
+          presentedHash,
+          params.idempotencyKey
         );
       }
 
       // Mark presented token consumed AND persist encrypted retry payload in SAME transaction!
-      await tx
+      const updateResult = await tx
         .update(authRefreshTokens)
         .set({
           consumedAt: now,
@@ -267,7 +322,15 @@ export class SessionService {
             eq(authRefreshTokens.id, tokenRecord.id),
             sql`${authRefreshTokens.consumedAt} IS NULL`
           )
+        )
+        .returning({ id: authRefreshTokens.id });
+
+      if (updateResult.length === 0) {
+        throw new AuthError(
+          AuthErrorCode.INTERNAL_AUTH_FAILURE,
+          "Concurrent refresh conflict: token was consumed by a concurrent transaction"
         );
+      }
 
       // 5. Insert successor child token record
       await tx.insert(authRefreshTokens).values({
@@ -306,6 +369,13 @@ export class SessionService {
       throw new AuthError(
         AuthErrorCode.REFRESH_TOKEN_REUSE,
         "Presented refresh token has already been consumed (theft suspected)"
+      );
+    }
+
+    if ((result as any).isIntegrityFailure) {
+      throw new AuthError(
+        AuthErrorCode.INTERNAL_AUTH_FAILURE,
+        `Authoritative retry record integrity failure: ${(result as any).errorDetail || "unable to decrypt"}`
       );
     }
 

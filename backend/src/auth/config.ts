@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseEncryptionKey } from "./crypto.js";
 
 export type AuthAuthority = "json" | "postgres";
 
@@ -112,13 +113,31 @@ export function parseAuthConfig(
     }
   }
 
-  // Invariant 4: In production, when refresh sessions are enabled, require REDIS_URL and encryption key
+  // Invariant 4: Validate SUCCESSOR_VAULT_ENCRYPTION_KEY if present or in production
+  if (config.SUCCESSOR_VAULT_ENCRYPTION_KEY) {
+    try {
+      parseEncryptionKey(config.SUCCESSOR_VAULT_ENCRYPTION_KEY);
+    } catch (err: unknown) {
+      throw new Error(
+        `Invalid SUCCESSOR_VAULT_ENCRYPTION_KEY: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  // Invariant 5: In production, when refresh sessions are enabled, require REDIS_URL and encryption key
   if (config.NODE_ENV === "production" && config.ENABLE_REFRESH_SESSIONS) {
     if (!config.REDIS_URL || config.REDIS_URL.trim().length === 0) {
       throw new Error("REDIS_URL is required in production when refresh sessions are enabled.");
     }
-    if (!config.SUCCESSOR_VAULT_ENCRYPTION_KEY || config.SUCCESSOR_VAULT_ENCRYPTION_KEY.length < 32) {
-      throw new Error("SUCCESSOR_VAULT_ENCRYPTION_KEY must be at least 32 characters in production.");
+    if (!config.SUCCESSOR_VAULT_ENCRYPTION_KEY) {
+      throw new Error("SUCCESSOR_VAULT_ENCRYPTION_KEY is required in production when refresh sessions are enabled.");
+    }
+    try {
+      parseEncryptionKey(config.SUCCESSOR_VAULT_ENCRYPTION_KEY);
+    } catch (err: unknown) {
+      throw new Error(
+        `Production refresh-session functionality requires valid SUCCESSOR_VAULT_ENCRYPTION_KEY: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
