@@ -50,7 +50,7 @@ AuraClave/
 - End‑to‑end tests with **Playwright** (not yet configured).
 
 ## Environment Variables (currently)
-- `JWT_SECRET` – fallback secret.
+- `JWT_SECRET` – required signing secret; no fallback is generated.
 - `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`.
 - `GROQ_API_KEY`.
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`.

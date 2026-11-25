@@ -18,16 +18,16 @@ This register identifies risks associated with the planned transition from the c
 
 ---
 
-## RISK-002 — Ephemeral JWT Secret (High)
+## RISK-002 — JWT Secret Configuration (High)
 
 | Field       | Detail |
 |-------------|--------|
-| **Status**  | Active |
+| **Status**  | Mitigated (M1.0) |
 | **Severity**| High |
 | **Area**    | Security / Authentication |
-| **Description** | `backend/src/auth.ts` generates a random JWT secret per process restart when `JWT_SECRET` is not set. All existing sessions are invalidated on each restart. |
-| **Impact**  | Users are signed out every time the backend restarts. Tokens cannot be verified across multiple backend instances (horizontal scaling breaks). |
-| **Mitigation** | Set `JWT_SECRET` as a persistent environment variable in all environments. This is documented in `backend/.env.example`. |
+| **Description** | The backend requires a configured `JWT_SECRET` and fails startup if it is missing; it does not generate a fallback secret. |
+| **Impact**  | Misconfigured deployments cannot start, preventing unstable or insecure token signing. |
+| **Mitigation** | Set a stable secret in the production environment. For local development, configure a private value in `backend/.env` using `backend/.env.example` as a template. |
 
 ---
 

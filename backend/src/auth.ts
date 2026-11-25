@@ -1,22 +1,13 @@
 import type { Request } from "express";
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { findUserById, type UserRecord } from "./db.js";
 
-let ephemeralJwtSecret: string | null = null;
-
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET?.trim();
-  if (secret) {
-    return secret;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is required.");
   }
-  if (!ephemeralJwtSecret) {
-    ephemeralJwtSecret = crypto.randomBytes(32).toString("hex");
-    console.error(
-      "[SECURITY WARNING] JWT_SECRET environment variable is not set. Using a temporary per-process random secret; set JWT_SECRET in Render Environment Variables for persistent sessions."
-    );
-  }
-  return ephemeralJwtSecret;
+  return secret;
 }
 
 export function assertAuthConfig(): void {

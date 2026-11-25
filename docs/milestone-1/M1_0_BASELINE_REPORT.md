@@ -11,29 +11,11 @@
 | Check | Result |
 |-------|--------|
 | Current branch | `feature/milestone-1-foundation` ✅ |
-| Branch in sync with remote | ✅ `up to date with origin/feature/milestone-1-foundation` |
-| Latest commit | `06479b9 fix(M1.0): extract health handlers to testable module; fix CI frontend test step` |
-| Prior commit | `8a2b495 feat(M1.0): engineering baseline, env validation, health tests, CI` |
-| Remote push confirmed | ✅ Pushed to `https://github.com/Nikhil1081/AuraClave` |
+| Local HEAD matches remote | ✅ Both `04f24c3c020ce6f388d84c6dc664d87a9aae17e2` |
+| Ahead / behind | `0 / 0` commits at synchronization |
+| Remote branch | `origin/feature/milestone-1-foundation` |
 
-**diff main…HEAD (confirmed scope — only M1.0 files):**
-```
-.github/workflows/ci.yml              | +75
-backend/package-lock.json             | +3402/-826
-backend/package.json                  | +7/-1
-backend/src/lib/env.ts                | +25
-backend/src/lib/health.ts             | +14
-backend/src/server.ts                 | +3/-8
-backend/tests/health.test.ts          | +37
-docs/milestone-1/M1_0_BASELINE_REPORT.md         | +144
-docs/milestone-1/M1_0_DEPENDENCY_INVENTORY.md    | +34
-docs/milestone-1/M1_0_EXISTING_API_INVENTORY.md  | +25
-docs/milestone-1/M1_0_MIGRATION_RISK_REGISTER.md | +99
-docs/milestone-1/M1_0_REPOSITORY_BASELINE.md     | +60
-firebase.json                         | +16
-```
-
-**Uncommitted nexmeet user changes (preserved, not committed):**
+**Uncommitted `nexmeet` changes present before this verification (preserved):**
 ```
 modified: nexmeet/README.md
 modified: nexmeet/src/components/HostAdmissionBanner.tsx
@@ -44,6 +26,8 @@ modified: nexmeet/src/pages/Meeting.tsx
 
 > [!IMPORTANT]
 > These 5 files are intentionally NOT committed in M1.0. They are pre-existing user changes unrelated to the engineering baseline.
+
+JWT validation and CI corrections in this report are local worktree changes and have not been committed or pushed.
 
 ---
 
@@ -80,15 +64,15 @@ The test **imports the same handler functions** used by production server.ts. A 
 |----------|-----------|
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Optional. Console `[WARN]` if missing; `/api/livekit/token` returns 503. |
 | `GROQ_API_KEY` | Optional. Console `[WARN]` if missing; AI Notes returns error. |
-| `JWT_SECRET` | Handled by `auth.ts`. If absent: ephemeral random secret generated per process, `[SECURITY WARNING]` logged. **Never hardcoded.** |
+| `JWT_SECRET` | Required at startup. Missing or whitespace-only values cause startup to fail; no fallback secret is generated. |
 
-**Development startup without credentials:** ✅ Works — warns about LiveKit/Groq but does not throw.
+**Optional service credentials missing:** ✅ LiveKit/Groq emit warnings; JWT remains required to start in every environment.
 
-**Production JWT missing:** ✅ Fails safely — ephemeral secret generated, warning logged. Sessions don't survive restarts.
+**JWT missing in any environment:** ✅ Fails startup before the server listens.
 
-**No generated/hardcoded production secret:** ✅ Confirmed — `crypto.randomBytes(32)` only as fallback, never committed.
+**Secret source:** ✅ Supplied via environment. Local development uses a private value in `backend/.env`; production uses a stable deployment secret. `backend/.env.example` is a template only.
 
-**Test execution requires real secrets:** ✅ No — health tests use isolated Express app, no env vars needed.
+**Tests:** ✅ Use a dedicated test secret; missing-secret validation is covered by `backend/tests/env.test.ts`.
 
 ---
 
@@ -103,11 +87,11 @@ The test **imports the same handler functions** used by production server.ts. A 
 | Install frontend deps | `npm --prefix nexmeet install` | ✅ |
 | Build frontend | `npm --prefix nexmeet run build` | ✅ script: `"build": "tsc -b && vite build"` |
 | Backend tests | `npm --prefix backend test` | ✅ script: `"test": "vitest run"` |
-| Frontend tests | Skips gracefully if no `test` script | ✅ Fixed — nexmeet has no `test` script |
+| Frontend tests | Skips if no `test` script; fails CI if tests fail | ✅ No frontend test files or `test` script currently exist |
 | Dependency audit | `npm --prefix backend audit --audit-level=high` | ✅ `continue-on-error: true` |
 | Secret scan | TruffleHog `--only-verified` | ✅ `continue-on-error: true` |
 
-**GitHub Actions run status:** ⏳ **Not yet observed** — the push just completed. CI will trigger automatically on `feature/milestone-1-foundation`. Check the [Actions tab](https://github.com/Nikhil1081/AuraClave/actions) to monitor. This report will not claim CI passed until a successful run is observed.
+**Remote GitHub Actions status:** ✅ `gh run list` showed three successful runs for the feature branch; latest run `45571705604` completed successfully for remote commit `04f24c3`. The local workflow change removing `continue-on-error` has not been pushed or run remotely.
 
 ---
 
@@ -135,11 +119,11 @@ Exit code: 0 ✅
 
  RUN  v2.1.9
 
- ✓ tests/health.test.ts (2 tests) 156ms
+ ✓ tests/env.test.ts (2 tests)
+ ✓ tests/health.test.ts (2 tests)
 
- Test Files  1 passed (1)
-      Tests  2 passed (2)
-   Duration  5.17s
+  Test Files  2 passed (2)
+       Tests  4 passed (4)
 ```
 
 ### Frontend tests
@@ -154,8 +138,8 @@ Result: Skipped — 0 tests exist. Not a regression.
 
 | Area | Check | Status |
 |------|-------|--------|
-| Authentication routes | `server.ts` unchanged except health handler import | ✅ No regression |
-| Registration / Login | `auth.ts`, `db.ts` unmodified | ✅ |
+| Authentication routes | `auth.ts` signing/verifying API preserved; missing secret now fails startup | ✅ |
+| Registration / Login | Route shapes preserved; JWT uses configured secret only | ✅ |
 | LiveKit token generation | `server.ts` route unmodified | ✅ |
 | Meeting / Admission | `roomManager.ts` unmodified | ✅ |
 | Captions | `nexmeet/src/pages/Meeting.tsx` — user-modified, not touched by M1.0 | ✅ |
@@ -171,12 +155,12 @@ Result: Skipped — 0 tests exist. Not a regression.
 | Risk | Status |
 |------|--------|
 | JSON file user store | Active — planned for M1.1 (PostgreSQL) |
-| Ephemeral JWT secret in dev | Active — documented; set `JWT_SECRET` in env |
+| Secret rotation / key management | Active — supply and rotate a stable `JWT_SECRET` through deployment configuration |
 | In-memory room state | Active — acceptable MVP; planned for post-M1.1 |
 | Broad CORS (`origin: true`) | Active — restrict before production |
 | No middleware-level integration tests | Active — deferred to M1.1+ |
 | Frontend chunk size > 500KB | Pre-existing warning; not introduced by M1.0 |
-| GitHub Actions run not yet confirmed | Pending — monitor [Actions tab](https://github.com/Nikhil1081/AuraClave/actions) |
+| Updated workflow run | Pending — local CI step change is not pushed; existing remote run passed before that change |
 
 ---
 
@@ -189,22 +173,22 @@ Result: Skipped — 0 tests exist. Not a regression.
 | All 5 M1.0 documents created | ✅ |
 | Backend env validation at startup | ✅ |
 | LiveKit / Groq optional (no crash without them) | ✅ |
-| No hardcoded/generated production JWT secret | ✅ |
-| Backend health tests pass (2/2) | ✅ |
+| No hardcoded/generated JWT fallback; missing secret blocks startup | ✅ |
+| Backend tests pass (4/4, including JWT env validation) | ✅ |
 | Health tests exercise production handler code | ✅ (after fix) |
 | CI workflow syntactically correct + commands verified | ✅ |
-| CI frontend test step handles missing script | ✅ (after fix) |
+| CI frontend test step skips only when script is absent and fails on test failure | ✅ locally inspected; updated workflow run pending |
 | Backend build exits 0 | ✅ |
 | Frontend build exits 0 | ✅ |
 | No M1.1 work started | ✅ |
 | No unrelated user changes committed | ✅ |
 | No destructive git commands executed | ✅ |
-| GitHub Actions run confirmed passing | ⏳ Pending — check Actions tab |
+| GitHub Actions run confirmed passing for current uncommitted changes | ⏳ Cannot be verified until the changes are pushed and CI runs |
 
 ---
 
 ## Conclusion
 
-**M1.0 is COMPLETE** for all locally verifiable criteria. The single open item is confirming the GitHub Actions run, which cannot be verified from this environment — it triggers automatically on the pushed branch. All code, documentation, tests, and CI pipeline are correct and ready.
+**M1.0 code and local checks pass:** backend build, frontend build, and all four backend tests succeeded; the existing remote CI run for `04f24c3` passed. The updated frontend-test failure handling has not yet been exercised by GitHub Actions because these local changes were not pushed. No M1.1 work has started.
 
-**M1.1 (PostgreSQL identity migration, custom auth sessions, token rotation) may begin once the GitHub Actions run is confirmed green.**
+**M1.1 remains gated** until the current changes are authorized for push and the resulting GitHub Actions run is confirmed green.

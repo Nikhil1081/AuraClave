@@ -1,15 +1,15 @@
 // Environment validation for AuraClave backend
 // This module validates required environment variables at startup.
-// It ensures JWT secret is present (or generates a temporary one) and logs warnings
-// for optional services (LiveKit, Groq) if they are not configured.
+// It ensures JWT_SECRET is configured and logs warnings for optional services.
 
 /**
  * Validate essential environment configuration.
  * Throws only for critical missing vars that would break core functionality.
  */
 export function validateEnvConfig(): void {
-  // JWT secret is essential for auth; if missing, a warning is emitted by auth module.
-  // We do not enforce here to allow dev without persisting secret.
+  if (!process.env.JWT_SECRET?.trim()) {
+    throw new Error("JWT_SECRET environment variable is required.");
+  }
 
   // LiveKit configuration is optional for non‑media routes.
   if (!process.env.LIVEKIT_URL || !process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {

@@ -51,7 +51,6 @@ jobs:
           else
             echo "No frontend test script defined. Skipping."
           fi
-        continue-on-error: true
 
       - name: Dependency vulnerability audit (backend)
         run: npm --prefix backend audit --audit-level=high
