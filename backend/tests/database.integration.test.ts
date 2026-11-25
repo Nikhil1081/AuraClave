@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -496,7 +496,7 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
       db
     );
 
-    const vaultKey = crypto.randomBytes(32);
+    const vaultKey = randomBytes(32);
     const vault = new EphemeralSuccessorVault(vaultKey, new InMemoryTransientStore());
     const sessionService = new SessionService(db, vault);
 
