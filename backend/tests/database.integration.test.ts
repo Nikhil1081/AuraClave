@@ -100,7 +100,7 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
           fullName: "Duplicate",
         })
         .returning(),
-    ).rejects.toMatchObject({ code: "23505" });
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
 
     const missingUserId = randomUUID();
     const expiresAt = new Date(Date.now() + 60_000);
@@ -110,28 +110,28 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
         refreshTokenHash: `orphan-session:${uniqueId}`,
         expiresAt,
       }),
-    ).rejects.toMatchObject({ code: "23503" });
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
     await expect(
       db.insert(emailVerificationTokens).values({
         userId: missingUserId,
         tokenHash: `orphan-verify:${uniqueId}`,
         expiresAt,
       }),
-    ).rejects.toMatchObject({ code: "23503" });
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
     await expect(
       db.insert(passwordResetTokens).values({
         userId: missingUserId,
         tokenHash: `orphan-reset:${uniqueId}`,
         expiresAt,
       }),
-    ).rejects.toMatchObject({ code: "23503" });
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
     await expect(
       db.insert(authAuditEvents).values({
         userId: missingUserId,
         eventType: "orphan_test",
         succeeded: false,
       }),
-    ).rejects.toMatchObject({ code: "23503" });
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
 
     expect(
       await updateIdentityUserProfile(
