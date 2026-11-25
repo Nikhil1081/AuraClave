@@ -1,144 +1,210 @@
-# M1.0 Baseline Report
-
-## Summary
-
-This report captures the verified state of the AuraClave repository at the close of Milestone 1.0 (Engineering Baseline). All findings are based on direct inspection of the actual source code and execution of build and test commands.
+# M1.0 Final Verification Report
 
 **Branch:** `feature/milestone-1-foundation`
-**Date completed:** 2026-11-25
+**Remote:** `origin/feature/milestone-1-foundation`
+**Verification date:** 2026-11-25
 
 ---
 
-## 1. Files Created in M1.0
+## 1. Git Verification
 
-| File | Purpose |
-|------|---------|
-| `docs/milestone-1/M1_0_REPOSITORY_BASELINE.md` | Directory structure, entry points, persistence, LiveKit, mobile |
-| `docs/milestone-1/M1_0_DEPENDENCY_INVENTORY.md` | Full dependency list for backend, frontend, mobile |
-| `docs/milestone-1/M1_0_EXISTING_API_INVENTORY.md` | All existing backend REST endpoints |
-| `docs/milestone-1/M1_0_MIGRATION_RISK_REGISTER.md` | 7 identified risks with severity and mitigations |
-| `docs/milestone-1/M1_0_BASELINE_REPORT.md` | This document |
-| `backend/src/lib/env.ts` | Startup environment validation (warnings for LiveKit/Groq if missing) |
-| `backend/tests/health.test.ts` | Vitest health endpoint test (2 tests) |
-| `.github/workflows/ci.yml` | GitHub Actions CI: install, build, test, audit, secret scan |
-| `backend/.env.example` | Placeholder env vars (no secrets) |
+| Check | Result |
+|-------|--------|
+| Current branch | `feature/milestone-1-foundation` ✅ |
+| Branch in sync with remote | ✅ `up to date with origin/feature/milestone-1-foundation` |
+| Latest commit | `06479b9 fix(M1.0): extract health handlers to testable module; fix CI frontend test step` |
+| Prior commit | `8a2b495 feat(M1.0): engineering baseline, env validation, health tests, CI` |
+| Remote push confirmed | ✅ Pushed to `https://github.com/Nikhil1081/AuraClave` |
+
+**diff main…HEAD (confirmed scope — only M1.0 files):**
+```
+.github/workflows/ci.yml              | +75
+backend/package-lock.json             | +3402/-826
+backend/package.json                  | +7/-1
+backend/src/lib/env.ts                | +25
+backend/src/lib/health.ts             | +14
+backend/src/server.ts                 | +3/-8
+backend/tests/health.test.ts          | +37
+docs/milestone-1/M1_0_BASELINE_REPORT.md         | +144
+docs/milestone-1/M1_0_DEPENDENCY_INVENTORY.md    | +34
+docs/milestone-1/M1_0_EXISTING_API_INVENTORY.md  | +25
+docs/milestone-1/M1_0_MIGRATION_RISK_REGISTER.md | +99
+docs/milestone-1/M1_0_REPOSITORY_BASELINE.md     | +60
+firebase.json                         | +16
+```
+
+**Uncommitted nexmeet user changes (preserved, not committed):**
+```
+modified: nexmeet/README.md
+modified: nexmeet/src/components/HostAdmissionBanner.tsx
+modified: nexmeet/src/lib/auraweave.ts
+modified: nexmeet/src/lib/auth.ts
+modified: nexmeet/src/pages/Meeting.tsx
+```
+
+> [!IMPORTANT]
+> These 5 files are intentionally NOT committed in M1.0. They are pre-existing user changes unrelated to the engineering baseline.
 
 ---
 
-## 2. Files Modified in M1.0
+## 2. Health Endpoint Verification
 
-| File | Change |
-|------|--------|
-| `backend/src/server.ts` | Added `import { validateEnvConfig } from "./lib/env.js"` and `validateEnvConfig()` call at startup |
-| `backend/package.json` | Added `"test"` and `"test:watch"` scripts; added `vitest` and `supertest` as devDependencies |
+### Production server health routes (`backend/src/server.ts`)
+```typescript
+app.get("/", rootHealthHandler);     // → { status: "ok", service: "AuraClave API", timestamp: "..." }
+app.get("/health", healthHandler);   // → { status: "healthy" }
+```
+
+### Production handler module (`backend/src/lib/health.ts`)
+```typescript
+export function rootHealthHandler(_req, res) {
+  res.json({ status: 'ok', service: 'AuraClave API', timestamp: new Date().toISOString() });
+}
+export function healthHandler(_req, res) {
+  res.json({ status: 'healthy' });
+}
+```
+
+### Test (`backend/tests/health.test.ts`)
+The test **imports the same handler functions** used by production server.ts. A minimal Express app mounts them — same code, same response shapes.
+
+**Known limitation:** Express middleware (security headers, CORS, body-parser) is not exercised in these unit tests. Full integration tests against the booted server are deferred to M1.1+ (requires LiveKit/Groq env or mocking).
 
 ---
 
-## 3. Build Verification
+## 3. Environment Validation
 
-### Backend TypeScript Build
+### `backend/src/lib/env.ts` behaviour
+
+| Variable | Treatment |
+|----------|-----------|
+| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Optional. Console `[WARN]` if missing; `/api/livekit/token` returns 503. |
+| `GROQ_API_KEY` | Optional. Console `[WARN]` if missing; AI Notes returns error. |
+| `JWT_SECRET` | Handled by `auth.ts`. If absent: ephemeral random secret generated per process, `[SECURITY WARNING]` logged. **Never hardcoded.** |
+
+**Development startup without credentials:** ✅ Works — warns about LiveKit/Groq but does not throw.
+
+**Production JWT missing:** ✅ Fails safely — ephemeral secret generated, warning logged. Sessions don't survive restarts.
+
+**No generated/hardcoded production secret:** ✅ Confirmed — `crypto.randomBytes(32)` only as fallback, never committed.
+
+**Test execution requires real secrets:** ✅ No — health tests use isolated Express app, no env vars needed.
+
+---
+
+## 4. CI Workflow Verification
+
+**File:** `.github/workflows/ci.yml`
+
+| Step | Command | Verified against package.json |
+|------|---------|-------------------------------|
+| Install backend deps | `npm --prefix backend install` | ✅ no install script needed |
+| Build backend | `npm --prefix backend run build` | ✅ script: `"build": "tsc"` |
+| Install frontend deps | `npm --prefix nexmeet install` | ✅ |
+| Build frontend | `npm --prefix nexmeet run build` | ✅ script: `"build": "tsc -b && vite build"` |
+| Backend tests | `npm --prefix backend test` | ✅ script: `"test": "vitest run"` |
+| Frontend tests | Skips gracefully if no `test` script | ✅ Fixed — nexmeet has no `test` script |
+| Dependency audit | `npm --prefix backend audit --audit-level=high` | ✅ `continue-on-error: true` |
+| Secret scan | TruffleHog `--only-verified` | ✅ `continue-on-error: true` |
+
+**GitHub Actions run status:** ⏳ **Not yet observed** — the push just completed. CI will trigger automatically on `feature/milestone-1-foundation`. Check the [Actions tab](https://github.com/Nikhil1081/AuraClave/actions) to monitor. This report will not claim CI passed until a successful run is observed.
+
+---
+
+## 5. Build and Test Results (Local)
+
+### Backend build
 ```
 Command: npm --prefix backend run build
-Result:  SUCCESS (exit code 0)
-Output:  dist/server.js, dist/auth.js, dist/db.js, dist/roomManager.js, dist/auraweave.js
+Exit code: 0 ✅
+Output: tsc — no errors
 ```
 
-### Frontend Build
+### Frontend build
 ```
 Command: npm --prefix nexmeet run build
-Result:  SUCCESS (previously verified; dist/ generated)
+Exit code: 0 ✅
+Output: vite v7.3.7 — 1609 modules transformed — dist/ generated
+Warning: chunk > 500KB (pre-existing; not introduced by M1.0)
 ```
 
----
-
-## 4. Test Results
-
-### Backend Tests (Vitest)
+### Backend tests
 ```
 Command: npm --prefix backend test
-Result:  PASS
+Exit code: 0 ✅
 
- ✓ tests/health.test.ts (2 tests) 96ms
+ RUN  v2.1.9
+
+ ✓ tests/health.test.ts (2 tests) 156ms
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Duration  3.51s
+   Duration  5.17s
 ```
 
-### Frontend Tests
-- Vitest is configured in `nexmeet/`; no test files currently exist.
-- CI workflow runs frontend tests with `continue-on-error: true` until tests are written.
-
----
-
-## 5. Environment Validation
-
-`backend/src/lib/env.ts` is imported at the top of `server.ts` and runs `validateEnvConfig()` on startup:
-
-- **LiveKit** (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`): Optional. Logs `[WARN]` if missing; LiveKit routes return `503` gracefully.
-- **Groq** (`GROQ_API_KEY`): Optional. Logs `[WARN]` if missing; AI Notes feature returns error gracefully.
-- **JWT_SECRET**: Handled by `auth.ts` — if absent, an ephemeral random secret is generated per process with a `[SECURITY WARNING]` log. Sessions do not survive restarts. Set `JWT_SECRET` in all environments.
-
----
-
-## 6. CI Pipeline
-
-`.github/workflows/ci.yml` defines two jobs:
-
-| Job | Steps |
-|-----|-------|
-| `build-and-test` | Checkout → Node 20 setup → Install backend deps → Build backend → Install frontend deps → Build frontend → Backend tests → Frontend tests (non-blocking) → Dependency audit |
-| `secret-scan` | TruffleHog scan on all commits |
-
-**CI status:** Workflow file exists locally on `feature/milestone-1-foundation`. Not yet executed — will run automatically on first push to GitHub.
-
----
-
-## 7. Git Branch Status
-
+### Frontend tests
 ```
-Branch: feature/milestone-1-foundation (created from main)
-Status: Uncommitted M1.0 changes staged and ready to commit
+No test script in nexmeet/package.json.
+Result: Skipped — 0 tests exist. Not a regression.
 ```
 
-Changes to commit:
-- `docs/milestone-1/` — all 5 M1.0 documents
-- `backend/src/lib/env.ts` — new environment validation module
-- `backend/src/server.ts` — env validation import added
-- `backend/package.json` — test scripts and vitest devDependency
-- `backend/tests/health.test.ts` — health endpoint tests
-- `.github/workflows/ci.yml` — GitHub Actions CI
-- `firebase.json` — existing untracked file (pre-existing)
+---
+
+## 6. Regression Checks
+
+| Area | Check | Status |
+|------|-------|--------|
+| Authentication routes | `server.ts` unchanged except health handler import | ✅ No regression |
+| Registration / Login | `auth.ts`, `db.ts` unmodified | ✅ |
+| LiveKit token generation | `server.ts` route unmodified | ✅ |
+| Meeting / Admission | `roomManager.ts` unmodified | ✅ |
+| Captions | `nexmeet/src/pages/Meeting.tsx` — user-modified, not touched by M1.0 | ✅ |
+| Frontend build | TypeScript + Vite exit 0 | ✅ |
+
+> [!NOTE]
+> Functionality was verified via successful TypeScript compilation and build, not live manual session testing. Live session testing (login → create meeting → join → captions) requires a running LiveKit server and is outside the CI scope of M1.0.
 
 ---
 
-## 8. Known Remaining Risks
+## 7. Remaining Risks
 
 | Risk | Status |
 |------|--------|
-| JSON file user store | Active — will be addressed in M1.1 (PostgreSQL migration) |
-| Ephemeral JWT secret | Active — mitigated by documentation; set `JWT_SECRET` in env |
-| In-memory room state | Active — acceptable for MVP; persistence planned post-M1.1 |
-| Broad CORS policy | Active — restrict to known origins before production launch |
-| No route-level tests | Partially mitigated — health tests added; auth/meeting tests in M1.1+ |
+| JSON file user store | Active — planned for M1.1 (PostgreSQL) |
+| Ephemeral JWT secret in dev | Active — documented; set `JWT_SECRET` in env |
+| In-memory room state | Active — acceptable MVP; planned for post-M1.1 |
+| Broad CORS (`origin: true`) | Active — restrict before production |
+| No middleware-level integration tests | Active — deferred to M1.1+ |
+| Frontend chunk size > 500KB | Pre-existing warning; not introduced by M1.0 |
+| GitHub Actions run not yet confirmed | Pending — monitor [Actions tab](https://github.com/Nikhil1081/AuraClave/actions) |
 
 ---
 
-## 9. M1.0 Acceptance Criteria
+## 8. M1.0 Acceptance Gate
 
 | Criterion | Status |
 |-----------|--------|
-| Feature branch created | ✅ `feature/milestone-1-foundation` |
-| Repository audit documents created | ✅ All 5 docs present |
-| Environment validation at startup | ✅ `env.ts` imported in server |
-| Backend tests exist and pass | ✅ 2/2 passing |
-| CI workflow created | ✅ `.github/workflows/ci.yml` |
-| No breaking changes to existing functionality | ✅ Verified by build success |
-| No secrets committed | ✅ `.env.example` only contains placeholders |
-| M1.1 work not started | ✅ No PostgreSQL, no token rotation, no new auth endpoints |
-
-**M1.0 is complete. Ready to commit and push to trigger CI.**
+| Feature branch `feature/milestone-1-foundation` created | ✅ |
+| Branch pushed to remote | ✅ |
+| All 5 M1.0 documents created | ✅ |
+| Backend env validation at startup | ✅ |
+| LiveKit / Groq optional (no crash without them) | ✅ |
+| No hardcoded/generated production JWT secret | ✅ |
+| Backend health tests pass (2/2) | ✅ |
+| Health tests exercise production handler code | ✅ (after fix) |
+| CI workflow syntactically correct + commands verified | ✅ |
+| CI frontend test step handles missing script | ✅ (after fix) |
+| Backend build exits 0 | ✅ |
+| Frontend build exits 0 | ✅ |
+| No M1.1 work started | ✅ |
+| No unrelated user changes committed | ✅ |
+| No destructive git commands executed | ✅ |
+| GitHub Actions run confirmed passing | ⏳ Pending — check Actions tab |
 
 ---
 
-*M1.0 closed: 2026-11-25*
+## Conclusion
+
+**M1.0 is COMPLETE** for all locally verifiable criteria. The single open item is confirming the GitHub Actions run, which cannot be verified from this environment — it triggers automatically on the pushed branch. All code, documentation, tests, and CI pipeline are correct and ready.
+
+**M1.1 (PostgreSQL identity migration, custom auth sessions, token rotation) may begin once the GitHub Actions run is confirmed green.**
