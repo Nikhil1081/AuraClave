@@ -226,16 +226,19 @@ export default function AuraWeaveConference({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
+      setModerationError("Live captions require Chrome, Edge, or Safari with Speech Recognition support.");
       setCaptionsEnabled(false);
       return;
     }
 
+    let isCancelled = false;
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = currentSpeechCode;
 
     recognition.onresult = (event: any) => {
+      if (isCancelled) return;
       let interim = "";
       let final = "";
 
@@ -250,18 +253,18 @@ export default function AuraWeaveConference({
       const text = (final || interim).trim();
       if (!text) return;
 
-      const myName = user?.user_metadata?.full_name || user?.email || "Speaker";
-      setCurrentCaption({ speaker: myName, text });
+      const speakerName = user?.user_metadata?.full_name || user?.email || "Speaker";
+      setCurrentCaption({ speaker: speakerName, text });
 
       if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
       captionTimeoutRef.current = setTimeout(() => setCurrentCaption(null), 4000);
 
       if (final.trim()) {
-        broadcastCaption(myName, final.trim());
+        broadcastCaption(speakerName, final.trim());
         setTranscript((prev) => [
           ...prev,
           {
-            speaker: myName,
+            speaker: speakerName,
             text: final.trim(),
             time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           }
@@ -269,9 +272,16 @@ export default function AuraWeaveConference({
       }
     };
 
-    recognition.onerror = () => {};
+    recognition.onerror = (event: any) => {
+      if (isCancelled) return;
+      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
+        setModerationError("Microphone permission is required for live captions.");
+        setCaptionsEnabled(false);
+      }
+    };
+
     recognition.onend = () => {
-      if (captionsEnabled && isStageMember) {
+      if (!isCancelled && captionsEnabled && isStageMember) {
         try {
           recognition.start();
         } catch {}
@@ -284,11 +294,18 @@ export default function AuraWeaveConference({
     } catch {}
 
     return () => {
+      isCancelled = true;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
       try {
         recognition.stop();
       } catch {}
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
     };
-  }, [captionsEnabled, currentSpeechCode, isStageMember, user]);
+  }, [captionsEnabled, currentSpeechCode, isStageMember, user, broadcastCaption]);
 
   // Zero-Prompt Recording
   const [isRecording, setIsRecording] = useState(false);
@@ -601,6 +618,7 @@ export default function AuraWeaveConference({
             {connectionStatus === "connected" ? <Wifi size={13} /> : <WifiOff size={13} />}
             <span>{connectionStatus === "reconnecting" ? "Reconnecting…" : connectionStatus}</span>
           </div>
+          {rtcError && <span className="meeting-connection-error" title={rtcError}>{rtcError}</span>}
 
           {isHost && <HostAdmissionBanner roomName={roomName} />}
 
@@ -874,10 +892,20 @@ export default function AuraWeaveConference({
           </div>
 
           {/* Live Closed Captions */}
-          {captionsEnabled && currentCaption && (
-            <div className="live-caption-pill">
-              <span className="caption-speaker">{currentCaption.speaker}:</span>
-              <span className="caption-text">{currentCaption.text}</span>
+          {captionsEnabled && (
+            <div className="live-caption-pill" aria-live="polite">
+              {currentCaption ? (
+                <>
+                  <span className="caption-speaker">{currentCaption.speaker}:</span>
+                  <span className="caption-text">{currentCaption.text}</span>
+                </>
+              ) : (
+                <span className="caption-text opacity-75">
+                  {isAudioMuted
+                    ? `Captions on (${language.toUpperCase()}) — unmute mic to speak`
+                    : `Listening for speech (${language.toUpperCase()})…`}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -1036,7 +1064,7 @@ export default function AuraWeaveConference({
                 <span className="btn-label">{layoutMode}</span>
               </button>
 
-              <LanguageSelector compact />
+              <LanguageSelector compact dropUp />
 
               <button
                 type="button"

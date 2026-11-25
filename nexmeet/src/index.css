@@ -2642,6 +2642,15 @@
   color: #f28b82;
 }
 
+.meeting-connection-error {
+  max-width: 260px;
+  overflow: hidden;
+  color: #f28b82;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .header-icon-btn {
   width: 38px !important;
   height: 38px !important;
@@ -2827,43 +2836,32 @@
 }
 
 /* Ensure Language Selector Button in Toolbar matches all other buttons */
-.meeting-footer .lang-btn {
-  height: 42px !important;
-  border-radius: 12px !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  padding: 0 12px !important;
-  color: #f1f5f9 !important;
-  font-size: 13px !important;
+.meeting-controls-wrap.compact-mode .lang-btn {
+  width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  gap: 2px !important;
+  font-size: 10px !important;
   font-weight: 600 !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  transition: all 0.15s ease !important;
+  flex-direction: column !important;
 }
 
-.meeting-footer .lang-btn:hover {
-  background: rgba(255, 255, 255, 0.14) !important;
-  border-color: rgba(255, 255, 255, 0.24) !important;
-  transform: translateY(-1px);
-}
-
-/* Dropdown MUST open UPWARDS from the bottom meeting toolbar */
-.meeting-footer .lang-dropdown {
-  top: auto !important;
-  bottom: calc(100% + 14px) !important;
-  left: 50% !important;
-  right: auto !important;
-  transform: translateX(-50%) !important;
-  z-index: 9999 !important;
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(124, 58, 237, 0.25) !important;
-  border: 1px solid rgba(139, 92, 246, 0.4) !important;
+.meeting-controls-wrap.large-mode .lang-btn {
+  width: 68px !important;
+  height: 56px !important;
+  padding: 6px 4px !important;
+  border-radius: 14px !important;
+  gap: 4px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  flex-direction: column !important;
 }
 
 /* Live Closed Captions Floating Banner */
 .live-caption-pill {
   position: fixed;
-  bottom: 84px;
+  bottom: 118px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(11, 15, 26, 0.92);
