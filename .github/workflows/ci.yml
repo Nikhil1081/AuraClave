@@ -1,0 +1,69 @@
+name: AuraClave CI
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+
+    env:
+      JWT_SECRET: ci-test-secret-do-not-use-in-production
+      PORT: 5000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend install
+
+      - name: Build backend (TypeScript)
+        run: npm --prefix backend run build
+
+      - name: Install frontend dependencies
+        run: npm --prefix nexmeet install
+
+      - name: Build frontend
+        run: npm --prefix nexmeet run build
+        env:
+          VITE_API_URL: http://localhost:5000
+
+      - name: Run backend tests
+        run: npm --prefix backend test
+
+      - name: Run frontend tests
+        run: npm --prefix nexmeet run test -- --run
+        continue-on-error: true
+
+      - name: Dependency vulnerability audit (backend)
+        run: npm --prefix backend audit --audit-level=high
+        continue-on-error: true
+
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --debug --only-verified
+        continue-on-error: true

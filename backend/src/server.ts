@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { validateEnvConfig } from "./lib/env.js";
+validateEnvConfig();
 import express, { type Request, type Response } from "express";
 import http from "http";
 import cors from "cors";

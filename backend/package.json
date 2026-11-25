@@ -5,6 +5,8 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts"
@@ -27,6 +29,9 @@
     "ws": "^8.22.2"
   },
   "devDependencies": {
-    "tsx": "^4.19.2"
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.2",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.9"
   }
 }
