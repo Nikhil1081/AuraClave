@@ -10,7 +10,12 @@ export interface KeyPairConfig {
 }
 
 const authEnvironmentSchema = z.object({
-  AUTH_AUTHORITY: z.enum(["json", "postgres"]).default("json"),
+  AUTH_AUTHORITY: z
+    .string()
+    .default("json")
+    .refine((val) => val === "json", {
+      message: "AUTH_AUTHORITY=postgres is not permitted prior to approved cutover. Default authority must remain 'json'.",
+    }),
   ENABLE_LEGACY_JWT_COMPATIBILITY: z
     .string()
     .optional()
@@ -78,6 +83,13 @@ export function parseAuthConfig(
   }
 
   const config = parsed.data;
+
+  // Invariant 0: PostgreSQL authentication is strictly not authorized until approved cutover
+  if ((env.AUTH_AUTHORITY as string) === "postgres") {
+    throw new Error(
+      "AUTH_AUTHORITY=postgres is not permitted prior to approved cutover. Default authority must remain 'json'."
+    );
+  }
 
   // Invariant 1: If legacy compatibility is enabled, JWT_SECRET must be present and non-empty
   if (config.ENABLE_LEGACY_JWT_COMPATIBILITY) {

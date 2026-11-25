@@ -97,32 +97,39 @@ export class SessionService {
   }): Promise<RefreshResult> {
     const presentedHash = hashRefreshToken(params.rawRefreshToken);
 
-    // 1. Check for valid idempotent retry in ephemeral encrypted vault
+    // 1. Check for valid idempotent retry in ephemeral encrypted vault (Redis/shared cache acceleration)
     if (params.idempotencyKey) {
       const cached = await this.successorVault.retrieveSuccessor(
         presentedHash,
         params.idempotencyKey
       );
-      if (cached) {
+      if (cached.outcome === "FOUND") {
         // Retrieve family to get userId and confirm active
         const [family] = await this.database
           .select()
           .from(authSessionFamilies)
-          .where(eq(authSessionFamilies.id, cached.familyId))
+          .where(eq(authSessionFamilies.id, cached.payload.familyId))
           .limit(1);
 
         if (family && !family.revokedAt && family.absoluteExpiresAt > new Date()) {
           return {
-            rawRefreshToken: cached.rawSuccessorToken,
-            familyId: cached.familyId,
+            rawRefreshToken: cached.payload.rawSuccessorToken,
+            familyId: cached.payload.familyId,
             userId: family.userId,
             isRetry: true,
           };
         }
+      } else if (cached.outcome === "INVALID") {
+        // Corrupted ciphertext / tampering detected in Redis: log audit and fail closed
+        throw new AuthError(
+          AuthErrorCode.INVALID_TOKEN,
+          `Tampered successor response payload detected: ${cached.error || "MAC verification failed"}`
+        );
       }
+      // If NOT_FOUND, EXPIRED, or UNAVAILABLE: proceed to authoritative PostgreSQL transaction!
     }
 
-    // 2. Perform transactional rotation
+    // 2. Perform transactional rotation with authoritative PostgreSQL retry-record persistence
     const result = await this.database.transaction(async (tx) => {
       // Find token record
       const [tokenRecord] = await tx
@@ -167,9 +174,32 @@ export class SessionService {
         );
       }
 
-      // 3. REPLAY DETECTION: Token already consumed!
+      // 3. REPLAY DETECTION VS AUTHORITATIVE RETRY RECOVERY
       if (tokenRecord.consumedAt) {
-        // Mark family revoked inside this transaction
+        // Check if this is an authoritative in-window retry recorded in PostgreSQL
+        if (
+          params.idempotencyKey &&
+          tokenRecord.idempotencyKey === params.idempotencyKey &&
+          tokenRecord.encryptedSuccessorPayload &&
+          tokenRecord.retryExpiresAt &&
+          new Date() <= tokenRecord.retryExpiresAt
+        ) {
+          // Decrypt authoritative payload
+          const recovered = this.successorVault.decryptPayload(
+            tokenRecord.encryptedSuccessorPayload
+          );
+          if (recovered) {
+            return {
+              isReplay: false,
+              isRetry: true,
+              rawRefreshToken: recovered.rawSuccessorToken,
+              familyId: family.id,
+              userId: family.userId,
+            };
+          }
+        }
+
+        // Replay confirmed! Mark family revoked inside this transaction
         const revokeReason = "replay_detected";
         await tx
           .update(authSessionFamilies)
@@ -205,13 +235,32 @@ export class SessionService {
         );
       }
 
-      // 4. Mark presented token consumed
+      // 4. Generate successor token and encrypt authoritative retry payload
       const now = new Date();
+      const { rawToken: rawSuccessorToken, tokenHash: successorHash } =
+        generateOpaqueRefreshToken();
+      const tokenTtlMs = 7 * 24 * 3600 * 1000; // 7 days inactivity
+      const successorExpiresAt = new Date(
+        Math.min(now.getTime() + tokenTtlMs, family.absoluteExpiresAt.getTime())
+      );
+      const retryExpiresAt = new Date(now.getTime() + 30 * 1000); // 30s authoritative retry window
+
+      let encryptedSuccessorPayload: string | undefined;
+      if (params.idempotencyKey) {
+        encryptedSuccessorPayload = this.successorVault.encryptForPersistence(
+          rawSuccessorToken,
+          family.id
+        );
+      }
+
+      // Mark presented token consumed AND persist encrypted retry payload in SAME transaction!
       await tx
         .update(authRefreshTokens)
         .set({
           consumedAt: now,
           idempotencyKey: params.idempotencyKey,
+          encryptedSuccessorPayload,
+          retryExpiresAt: params.idempotencyKey ? retryExpiresAt : null,
         })
         .where(
           and(
@@ -220,14 +269,7 @@ export class SessionService {
           )
         );
 
-      // 5. Generate successor token
-      const { rawToken: rawSuccessorToken, tokenHash: successorHash } =
-        generateOpaqueRefreshToken();
-      const tokenTtlMs = 7 * 24 * 3600 * 1000; // 7 days inactivity
-      const successorExpiresAt = new Date(
-        Math.min(now.getTime() + tokenTtlMs, family.absoluteExpiresAt.getTime())
-      );
-
+      // 5. Insert successor child token record
       await tx.insert(authRefreshTokens).values({
         familyId: family.id,
         tokenHash: successorHash,
@@ -253,10 +295,10 @@ export class SessionService {
 
       return {
         isReplay: false,
+        isRetry: false,
         rawRefreshToken: rawSuccessorToken,
         familyId: family.id,
         userId: family.userId,
-        isRetry: false,
       };
     });
 
@@ -267,15 +309,29 @@ export class SessionService {
       );
     }
 
-    // 6. Cache successor in vault for 30s idempotent retry
+    if (result.isRetry) {
+      return {
+        rawRefreshToken: result.rawRefreshToken!,
+        familyId: result.familyId,
+        userId: result.userId!,
+        isRetry: true,
+      };
+    }
+
+    // 6. Cache successor in Redis/transient vault for 30s acceleration
+    // If Redis fails, PostgreSQL authoritative retry record already committed!
     if (params.idempotencyKey && result.rawRefreshToken) {
-      await this.successorVault.storeSuccessor(
-        presentedHash,
-        params.idempotencyKey,
-        result.rawRefreshToken,
-        result.familyId,
-        30
-      );
+      try {
+        await this.successorVault.storeSuccessor(
+          presentedHash,
+          params.idempotencyKey,
+          result.rawRefreshToken,
+          result.familyId,
+          30
+        );
+      } catch {
+        // Redis failure does not invalidate transaction or fail request
+      }
     }
 
     return {

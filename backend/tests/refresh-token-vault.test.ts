@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import crypto from "crypto";
 import { generateOpaqueRefreshToken, hashRefreshToken } from "../src/auth/refresh-token.js";
-import { EphemeralSuccessorVault } from "../src/auth/successor-vault.js";
-import { InMemoryTransientStore } from "../src/auth/transient-store.js";
+import {
+  EphemeralSuccessorVault,
+  createSuccessorVaultFromConfig,
+} from "../src/auth/successor-vault.js";
+import {
+  InMemoryTransientStore,
+  TransientStoreOutcome,
+} from "../src/auth/transient-store.js";
 
 describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => {
+  const testKey = crypto.randomBytes(32);
+
   it("generates opaque refresh tokens with 256 bits of entropy and SHA-256 digests", () => {
     const { rawToken, tokenHash } = generateOpaqueRefreshToken();
     expect(typeof rawToken).toBe("string");
@@ -13,8 +21,8 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     expect(hashRefreshToken(rawToken)).toBe(tokenHash);
   });
 
-  it("safely stores and retrieves successor responses within TTL", async () => {
-    const vault = new EphemeralSuccessorVault();
+  it("safely stores and retrieves successor responses with FOUND outcome", async () => {
+    const vault = new EphemeralSuccessorVault(testKey, new InMemoryTransientStore());
     const tokenHash = "dummy-token-hash-12345";
     const idempotencyKey = "client-uuid-idem-key-1";
     const successorToken = "raw-successor-token-67890";
@@ -23,13 +31,15 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     await vault.storeSuccessor(tokenHash, idempotencyKey, successorToken, familyId, 2); // 2 second TTL
 
     const cached = await vault.retrieveSuccessor(tokenHash, idempotencyKey);
-    expect(cached).not.toBeNull();
-    expect(cached?.rawSuccessorToken).toBe(successorToken);
-    expect(cached?.familyId).toBe(familyId);
+    expect(cached.outcome).toBe("FOUND");
+    if (cached.outcome === "FOUND") {
+      expect(cached.payload.rawSuccessorToken).toBe(successorToken);
+      expect(cached.payload.familyId).toBe(familyId);
+    }
   });
 
-  it("does not retrieve successor if idempotency key is different", async () => {
-    const vault = new EphemeralSuccessorVault();
+  it("returns NOT_FOUND if idempotency key is different", async () => {
+    const vault = new EphemeralSuccessorVault(testKey, new InMemoryTransientStore());
     const tokenHash = "dummy-token-hash-12345";
     const idempotencyKey = "client-uuid-idem-key-1";
     const successorToken = "raw-successor-token-67890";
@@ -38,11 +48,11 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     await vault.storeSuccessor(tokenHash, idempotencyKey, successorToken, familyId, 30);
 
     const wrongKeyResult = await vault.retrieveSuccessor(tokenHash, "different-idempotency-key");
-    expect(wrongKeyResult).toBeNull();
+    expect(wrongKeyResult.outcome).toBe("NOT_FOUND");
   });
 
-  it("expires cached successor responses past TTL", async () => {
-    const vault = new EphemeralSuccessorVault();
+  it("returns EXPIRED for cached successor responses past TTL", async () => {
+    const vault = new EphemeralSuccessorVault(testKey, new InMemoryTransientStore());
     const tokenHash = "dummy-token-hash-12345";
     const idempotencyKey = "client-uuid-idem-key-1";
     const successorToken = "raw-successor-token-67890";
@@ -53,7 +63,7 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     await new Promise((r) => setTimeout(r, 60));
 
     const expiredResult = await vault.retrieveSuccessor(tokenHash, idempotencyKey);
-    expect(expiredResult).toBeNull();
+    expect(expiredResult.outcome).toBe("EXPIRED");
   });
 
   it("supports multi-instance access: two independent API nodes sharing same transient store", async () => {
@@ -78,15 +88,17 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
 
     // Node B receives the retry request from the client and retrieves the successor
     const retrievedByNodeB = await vaultNodeB.retrieveSuccessor(tokenHash, idempotencyKey);
-    expect(retrievedByNodeB).not.toBeNull();
-    expect(retrievedByNodeB?.rawSuccessorToken).toBe(successorToken);
-    expect(retrievedByNodeB?.familyId).toBe(familyId);
+    expect(retrievedByNodeB.outcome).toBe("FOUND");
+    if (retrievedByNodeB.outcome === "FOUND") {
+      expect(retrievedByNodeB.payload.rawSuccessorToken).toBe(successorToken);
+      expect(retrievedByNodeB.payload.familyId).toBe(familyId);
+    }
   });
 
   it("enforces confidentiality: raw successor token is never in plaintext in transient store", async () => {
     const sharedMap = new Map();
     const store = new InMemoryTransientStore(sharedMap);
-    const vault = new EphemeralSuccessorVault(undefined, store);
+    const vault = new EphemeralSuccessorVault(testKey, store);
 
     const tokenHash = "confidential-token-hash";
     const idempotencyKey = "confidential-idem-key";
@@ -108,10 +120,10 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     expect(parsed.data).toBeDefined(); // Hex ciphertext
   });
 
-  it("fails closed on authentication-tag tampering", async () => {
+  it("returns INVALID on authentication-tag tampering", async () => {
     const sharedMap = new Map();
     const store = new InMemoryTransientStore(sharedMap);
-    const vault = new EphemeralSuccessorVault(undefined, store);
+    const vault = new EphemeralSuccessorVault(testKey, store);
 
     const tokenHash = "tamper-test-hash";
     const idempotencyKey = "tamper-test-key";
@@ -127,25 +139,45 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
       sharedMap.set(k, { ...v, value: JSON.stringify(record) });
     }
 
-    // Attempt retrieval: AES-GCM verification must fail closed and return null
+    // Attempt retrieval: AES-GCM verification must fail and return typed outcome INVALID
     const result = await vault.retrieveSuccessor(tokenHash, idempotencyKey);
-    expect(result).toBeNull();
+    expect(result.outcome).toBe("INVALID");
   });
 
-  it("fails closed safely when cache is lost or unavailable", async () => {
-    // Failing store adapter simulating Redis connection drop / outage
+  it("returns UNAVAILABLE safely when store encounters an outage", async () => {
     const brokenStore = {
-      async get(): Promise<string | null> {
-        return null; // Simulates cache miss on outage
+      async get() {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Connection lost" };
       },
-      async set(): Promise<void> {
-        throw new Error("Redis connection dropped");
+      async set() {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Connection lost" };
       },
-      async del(): Promise<void> {},
+      async del() {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Connection lost" };
+      },
     };
 
-    const vault = new EphemeralSuccessorVault(undefined, brokenStore);
+    const vault = new EphemeralSuccessorVault(testKey, brokenStore);
     const retrieved = await vault.retrieveSuccessor("any-hash", "any-key");
-    expect(retrieved).toBeNull(); // Fails closed without throwing or crashing API
+    expect(retrieved.outcome).toBe("UNAVAILABLE");
+  });
+
+  it("proves production configuration cannot silently select in-memory storage", () => {
+    expect(() =>
+      createSuccessorVaultFromConfig({
+        NODE_ENV: "production",
+        ENABLE_REFRESH_SESSIONS: true,
+        // REDIS_URL missing!
+      })
+    ).toThrow("Production refresh-session functionality requires REDIS_URL");
+
+    expect(() =>
+      createSuccessorVaultFromConfig({
+        NODE_ENV: "production",
+        ENABLE_REFRESH_SESSIONS: true,
+        REDIS_URL: "redis://127.0.0.1:6379",
+        // SUCCESSOR_VAULT_ENCRYPTION_KEY missing!
+      })
+    ).toThrow("SUCCESSOR_VAULT_ENCRYPTION_KEY");
   });
 });

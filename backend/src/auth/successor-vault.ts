@@ -1,6 +1,12 @@
+import { encryptPayload, decryptPayload, type EncryptedData } from "./crypto.js";
+import {
+  type ITransientStore,
+  InMemoryTransientStore,
+  RedisTransientStore,
+  TransientStoreOutcome,
+  type TransientStoreResult,
+} from "./transient-store.js";
 import crypto from "crypto";
-import type { ITransientStore } from "./transient-store.js";
-import { InMemoryTransientStore } from "./transient-store.js";
 
 export interface CachedSuccessorPayload {
   rawSuccessorToken: string;
@@ -8,35 +14,36 @@ export interface CachedSuccessorPayload {
   createdAt: number;
 }
 
-interface EncryptedPayload {
-  iv: string;
-  authTag: string;
-  data: string;
-}
+export type VaultRetrievalOutcome =
+  | { outcome: "FOUND"; payload: CachedSuccessorPayload }
+  | { outcome: "NOT_FOUND" }
+  | { outcome: "EXPIRED" }
+  | { outcome: "UNAVAILABLE"; error?: string }
+  | { outcome: "INVALID"; error?: string };
 
 /**
  * Ephemeral encrypted successor-response vault for bounded 30-second idempotent retry handling.
  * Multi-instance design:
  * Uses AES-256-GCM authenticated encryption.
- * Encryption key is either injected from environment (SUCCESSOR_VAULT_ENCRYPTION_KEY) or derived.
- * The encrypted ciphertext is stored in a shared distributed transient store (e.g. Redis).
+ * The encrypted ciphertext is stored in a shared distributed transient store (Redis or in-memory for testing).
  * Raw successor tokens are NEVER stored in plaintext in the transient store, memory, database, or logs.
- * Expired entries (> 30s) are automatically expired by the transient store TTL.
  */
 export class EphemeralSuccessorVault {
   private vaultKey: Buffer;
   private store: ITransientStore;
 
-  constructor(vaultKey?: Buffer, store?: ITransientStore) {
-    // 256-bit encryption key for AES-256-GCM
-    this.vaultKey = vaultKey || crypto.randomBytes(32);
-    this.store = store || new InMemoryTransientStore();
+  constructor(vaultKey: Buffer, store: ITransientStore) {
+    if (vaultKey.length !== 32) {
+      throw new Error("Vault key must be exactly 32 bytes for AES-256-GCM.");
+    }
+    this.vaultKey = vaultKey;
+    this.store = store;
   }
 
   /**
    * Derives a deterministic storage key using SHA-256 of the presented token digest and idempotency key.
    */
-  private deriveStorageKey(tokenHash: string, idempotencyKey: string): string {
+  public deriveStorageKey(tokenHash: string, idempotencyKey: string): string {
     return `auraclave:retry:${crypto
       .createHash("sha256")
       .update(`${tokenHash}:${idempotencyKey}`)
@@ -52,7 +59,7 @@ export class EphemeralSuccessorVault {
     rawSuccessorToken: string,
     familyId: string,
     ttlSeconds = 30
-  ): Promise<void> {
+  ): Promise<TransientStoreResult<void>> {
     const key = this.deriveStorageKey(presentedTokenHash, idempotencyKey);
     const payload: CachedSuccessorPayload = {
       rawSuccessorToken,
@@ -60,75 +67,143 @@ export class EphemeralSuccessorVault {
       createdAt: Date.now(),
     };
 
-    const iv = crypto.randomBytes(12); // Standard 96-bit IV for AES-GCM
-    const cipher = crypto.createCipheriv("aes-256-gcm", this.vaultKey, iv);
-    let encrypted = cipher.update(JSON.stringify(payload), "utf-8", "hex");
-    encrypted += cipher.final("hex");
-    const authTag = cipher.getAuthTag().toString("hex");
-
-    const record: EncryptedPayload = {
-      iv: iv.toString("hex"),
-      authTag,
-      data: encrypted,
-    };
-
-    await this.store.set(key, JSON.stringify(record), ttlSeconds);
+    const encrypted = encryptPayload(JSON.stringify(payload), this.vaultKey);
+    return await this.store.set(key, JSON.stringify(encrypted), ttlSeconds);
   }
 
   /**
-   * Retrieves and decrypts the cached successor if present, matching, and within the 30s TTL.
-   * If decryption fails (e.g. authTag mismatch / tampering) or store is missing, returns null safely.
+   * Encrypts payload directly for PostgreSQL persistence in the same rotation transaction.
    */
-  public async retrieveSuccessor(
-    presentedTokenHash: string,
-    idempotencyKey: string
-  ): Promise<CachedSuccessorPayload | null> {
-    const key = this.deriveStorageKey(presentedTokenHash, idempotencyKey);
-    const serialized = await this.store.get(key);
-    if (!serialized) return null;
+  public encryptForPersistence(
+    rawSuccessorToken: string,
+    familyId: string
+  ): string {
+    const payload: CachedSuccessorPayload = {
+      rawSuccessorToken,
+      familyId,
+      createdAt: Date.now(),
+    };
+    return JSON.stringify(encryptPayload(JSON.stringify(payload), this.vaultKey));
+  }
 
+  /**
+   * Decrypts payload from PostgreSQL or Redis.
+   */
+  public decryptPayload(ciphertextJson: string): CachedSuccessorPayload | null {
     try {
-      const record: EncryptedPayload = JSON.parse(serialized);
-      const { iv, authTag, data } = record;
-      const decipher = crypto.createDecipheriv(
-        "aes-256-gcm",
-        this.vaultKey,
-        Buffer.from(iv, "hex")
-      );
-      decipher.setAuthTag(Buffer.from(authTag, "hex"));
-      let decrypted = decipher.update(data, "hex", "utf-8");
-      decrypted += decipher.final("utf-8");
-      return JSON.parse(decrypted) as CachedSuccessorPayload;
+      const encryptedData: EncryptedData = JSON.parse(ciphertextJson);
+      const plaintext = decryptPayload(encryptedData, this.vaultKey);
+      return JSON.parse(plaintext) as CachedSuccessorPayload;
     } catch {
-      // Tampering or decryption failure: fail closed safely without revealing internals
       return null;
     }
   }
 
   /**
-   * Returns the underlying transient store.
+   * Retrieves and decrypts the cached successor from the transient store with typed outcomes.
    */
+  public async retrieveSuccessor(
+    presentedTokenHash: string,
+    idempotencyKey: string
+  ): Promise<VaultRetrievalOutcome> {
+    const key = this.deriveStorageKey(presentedTokenHash, idempotencyKey);
+    const storeRes = await this.store.get(key);
+
+    if (storeRes.outcome === TransientStoreOutcome.NOT_FOUND) {
+      return { outcome: "NOT_FOUND" };
+    }
+    if (storeRes.outcome === TransientStoreOutcome.EXPIRED) {
+      return { outcome: "EXPIRED" };
+    }
+    if (storeRes.outcome === TransientStoreOutcome.UNAVAILABLE) {
+      return { outcome: "UNAVAILABLE", error: storeRes.error };
+    }
+
+    if (!storeRes.value) {
+      return { outcome: "NOT_FOUND" };
+    }
+
+    try {
+      const encryptedData: EncryptedData = JSON.parse(storeRes.value);
+      const plaintext = decryptPayload(encryptedData, this.vaultKey);
+      const payload = JSON.parse(plaintext) as CachedSuccessorPayload;
+      return { outcome: "FOUND", payload };
+    } catch (err: unknown) {
+      return { outcome: "INVALID", error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   public getStore(): ITransientStore {
     return this.store;
   }
 
-  /**
-   * Returns the vault encryption key.
-   */
   public getVaultKey(): Buffer {
     return this.vaultKey;
   }
 }
 
-let defaultSuccessorVault: EphemeralSuccessorVault | null = null;
+let configuredSuccessorVault: EphemeralSuccessorVault | null = null;
+
+/**
+ * Creates and initializes a successor vault strictly from configuration.
+ * Fails closed in production if required infrastructure is missing.
+ */
+export function createSuccessorVaultFromConfig(
+  config: {
+    NODE_ENV?: string;
+    ENABLE_REFRESH_SESSIONS?: boolean;
+    REDIS_URL?: string;
+    SUCCESSOR_VAULT_ENCRYPTION_KEY?: string;
+  },
+  customStore?: ITransientStore
+): EphemeralSuccessorVault {
+  // If custom store provided (e.g. in tests)
+  if (customStore) {
+    const key = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
+      ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
+      : crypto.randomBytes(32);
+    return new EphemeralSuccessorVault(key, customStore);
+  }
+
+  const isProduction = config.NODE_ENV === "production";
+  const refreshEnabled = config.ENABLE_REFRESH_SESSIONS === true;
+
+  if (isProduction && refreshEnabled) {
+    if (!config.REDIS_URL?.trim()) {
+      throw new Error("Production refresh-session functionality requires REDIS_URL to be configured.");
+    }
+    if (!config.SUCCESSOR_VAULT_ENCRYPTION_KEY || config.SUCCESSOR_VAULT_ENCRYPTION_KEY.length < 32) {
+      throw new Error("Production refresh-session functionality requires SUCCESSOR_VAULT_ENCRYPTION_KEY (>= 32 chars).");
+    }
+    const key = Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32);
+    const redisStore = new RedisTransientStore(config.REDIS_URL);
+    return new EphemeralSuccessorVault(key, redisStore);
+  }
+
+  // Non-production or test:
+  if (config.REDIS_URL?.trim()) {
+    const key = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
+      ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
+      : crypto.randomBytes(32);
+    return new EphemeralSuccessorVault(key, new RedisTransientStore(config.REDIS_URL));
+  }
+
+  // Development/Test fallback
+  const devKey = config.SUCCESSOR_VAULT_ENCRYPTION_KEY
+    ? Buffer.from(config.SUCCESSOR_VAULT_ENCRYPTION_KEY, "utf-8").subarray(0, 32)
+    : crypto.randomBytes(32);
+  return new EphemeralSuccessorVault(devKey, new InMemoryTransientStore());
+}
 
 export function getSuccessorVault(): EphemeralSuccessorVault {
-  if (!defaultSuccessorVault) {
-    defaultSuccessorVault = new EphemeralSuccessorVault();
+  if (!configuredSuccessorVault) {
+    // Lazy default fallback for local/tests
+    const devKey = crypto.randomBytes(32);
+    configuredSuccessorVault = new EphemeralSuccessorVault(devKey, new InMemoryTransientStore());
   }
-  return defaultSuccessorVault;
+  return configuredSuccessorVault;
 }
 
 export function setSuccessorVault(vault: EphemeralSuccessorVault): void {
-  defaultSuccessorVault = vault;
+  configuredSuccessorVault = vault;
 }

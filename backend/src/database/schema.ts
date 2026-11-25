@@ -120,6 +120,8 @@ export const authRefreshTokens = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
     idempotencyKey: text("idempotency_key"),
+    encryptedSuccessorPayload: text("encrypted_successor_payload"),
+    retryExpiresAt: timestamp("retry_expires_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -129,6 +131,7 @@ export const authRefreshTokens = pgTable(
     index("auth_refresh_tokens_family_id_idx").on(table.familyId),
     index("auth_refresh_tokens_parent_token_idx").on(table.parentTokenId),
     index("auth_refresh_tokens_expiry_idx").on(table.expiresAt),
+    index("auth_refresh_tokens_retry_expiry_idx").on(table.retryExpiresAt),
     check(
       "auth_refresh_tokens_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`,

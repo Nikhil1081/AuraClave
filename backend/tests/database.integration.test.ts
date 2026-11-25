@@ -544,6 +544,18 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
       expect(retryResult.isRetry).toBe(true);
       expect(retryResult.rawRefreshToken).toBe(token2); // Re-issued identical successor!
 
+      // 3b. Verify PostgreSQL authoritative retry recovery when Redis/transient vault fails or misses
+      // Create a fresh session service pointing to an empty/broken vault (simulating Redis outage on retry)
+      const emptyVault = new EphemeralSuccessorVault(vault.getVaultKey(), new InMemoryTransientStore());
+      const sessionServiceWithEmptyVault = new SessionService(db, emptyVault);
+
+      const dbRetryResult = await sessionServiceWithEmptyVault.rotateRefreshToken({
+        rawRefreshToken: token1,
+        idempotencyKey: idemKey,
+      });
+      expect(dbRetryResult.isRetry).toBe(true);
+      expect(dbRetryResult.rawRefreshToken).toBe(token2); // Successfully recovered from PostgreSQL authoritative record!
+
       // 4. Replay attack attempt: presenting already-consumed token1 with DIFFERENT idempotency key (or none)
       let replayError: any;
       try {

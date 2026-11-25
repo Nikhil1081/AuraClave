@@ -195,3 +195,27 @@ The successor vault was refactored into a layered architecture:
 - **Integrity & Tampering Defense:** Alteration of any byte in the ciphertext or auth tag in the shared store fails MAC verification, causing the vault to return `null` and fail closed safely.
 - **Cache Loss & Disconnection:** If the shared store is unreachable or flushes, the retry returns `null`. The client transaction then evaluates database state. Cache loss cannot create duplicate successors or leak secrets.
 - **Production Guardrail:** When `NODE_ENV=production` and `ENABLE_REFRESH_SESSIONS=true`, startup validates that `REDIS_URL` is configured and `SUCCESSOR_VAULT_ENCRYPTION_KEY` contains at least 32 characters, preventing silent fallback to process-local memory.
+
+---
+
+## 9. Final Correction Phase: Distributed Refresh-Token Reliability & Production Safety
+
+### 9.1 Root Cause & Redis Decoupling
+In high-throughput distributed systems, relying solely on Redis or an external transient store for recovering a committed successor introduces a race condition and fault vulnerability: if a database commit succeeds but Redis network calls fail or time out, the predecessor token is consumed in the database while the successor payload is lost, making legitimate retries indistinguishable from token replays.
+
+### 9.2 Architecture & Transaction Flow
+The retry-recovery architecture now implements **authoritative transactional persistence** with Redis serving strictly as an acceleration/caching layer:
+1. **Atomic Dual-Persistence in PostgreSQL:** In the exact same database transaction that consumes the predecessor token and inserts the child successor token:
+   - The successor token is encrypted using AES-256-GCM.
+   - The encrypted payload is persisted in `auth_refresh_tokens.encrypted_successor_payload`.
+   - The exact retry expiration is set in `auth_refresh_tokens.retry_expires_at` (30 seconds).
+   - The presenting `idempotency_key` is recorded.
+2. **Redis as Non-Blocking Acceleration:** After the PostgreSQL transaction successfully commits, the ciphertext is asynchronously mirrored to Redis for rapid multi-node retrieval.
+3. **Recovery Priority:**
+   - On retry: Redis is queried first. If `outcome === "FOUND"`, the successor is returned instantly without hitting the database.
+   - If Redis is `NOT_FOUND`, `EXPIRED`, or `UNAVAILABLE`: the request proceeds to PostgreSQL.
+   - When PostgreSQL inspects the token record and sees `consumed_at IS NOT NULL`, it evaluates whether the request matches `tokenRecord.idempotencyKey` and `now() <= tokenRecord.retryExpiresAt`.
+   - If in-window and matching: PostgreSQL decrypts `encrypted_successor_payload` and re-delivers the identical successor.
+   - If out-of-window or mismatched idempotency key: Replay theft is confirmed, immediately revoking the entire session family.
+4. **Typed Transient Store Outcomes:** All transient store operations explicitly return `FOUND`, `NOT_FOUND`, `EXPIRED`, `UNAVAILABLE`, or `INVALID`. A Redis outage (`UNAVAILABLE`) never falsely triggers family revocation.
+5. **Production Authority Safeguards:** `AUTH_AUTHORITY=postgres` is strictly rejected at startup with an informative validation error; JSON authentication remains the sole active production authority.

@@ -64,6 +64,15 @@ describe("M1.4.1 Authentication Configuration", () => {
     expect(valid.REJECT_LEGACY_JWT_AFTER).toBe("2027-01-01T00:00:00Z");
   });
 
+  it("strictly rejects AUTH_AUTHORITY=postgres prior to cutover approval", () => {
+    expect(() =>
+      parseAuthConfig({
+        AUTH_AUTHORITY: "postgres" as any,
+        JWT_SECRET: "test-secret-at-least-32-chars-long-for-testing",
+      })
+    ).toThrow("AUTH_AUTHORITY=postgres is not permitted prior to approved cutover");
+  });
+
   it("enforces REDIS_URL and encryption key in production when refresh sessions are enabled", () => {
     expect(() =>
       parseAuthConfig({

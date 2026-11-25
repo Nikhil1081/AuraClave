@@ -1,22 +1,43 @@
 /**
+ * Explicit outcomes for transient-store operations.
+ * Distinguishes between cache hits, misses, expirations, infrastructure outages, and tampering.
+ */
+export const TransientStoreOutcome = {
+  FOUND: "FOUND",
+  NOT_FOUND: "NOT_FOUND",
+  EXPIRED: "EXPIRED",
+  UNAVAILABLE: "UNAVAILABLE",
+  INVALID: "INVALID",
+} as const;
+
+export type TransientStoreOutcome =
+  (typeof TransientStoreOutcome)[keyof typeof TransientStoreOutcome];
+
+export interface TransientStoreResult<T = string> {
+  outcome: TransientStoreOutcome;
+  value?: T;
+  error?: string;
+}
+
+/**
  * Abstract transient key-value store interface for distributed ephemeral data.
  * Used for multi-instance successor-response retry caching.
  */
 export interface ITransientStore {
   /**
-   * Retrieves a string value by key. Returns null if not found or expired.
+   * Retrieves a string value by key with typed outcome.
    */
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<TransientStoreResult<string>>;
 
   /**
    * Sets a string value with a time-to-live in seconds.
    */
-  set(key: string, value: string, ttlSeconds: number): Promise<void>;
+  set(key: string, value: string, ttlSeconds: number): Promise<TransientStoreResult<void>>;
 
   /**
    * Deletes a key from the store.
    */
-  del(key: string): Promise<void>;
+  del(key: string): Promise<TransientStoreResult<void>>;
 
   /**
    * Closes or disconnects the store client (if applicable).
@@ -36,27 +57,31 @@ export class InMemoryTransientStore implements ITransientStore {
     this.store = sharedMap || new Map();
   }
 
-  public async get(key: string): Promise<string | null> {
+  public async get(key: string): Promise<TransientStoreResult<string>> {
     const entry = this.store.get(key);
-    if (!entry) return null;
+    if (!entry) {
+      return { outcome: TransientStoreOutcome.NOT_FOUND };
+    }
 
     if (Date.now() > entry.expiresAt) {
       this.store.delete(key);
-      return null;
+      return { outcome: TransientStoreOutcome.EXPIRED };
     }
 
-    return entry.value;
+    return { outcome: TransientStoreOutcome.FOUND, value: entry.value };
   }
 
-  public async set(key: string, value: string, ttlSeconds: number): Promise<void> {
+  public async set(key: string, value: string, ttlSeconds: number): Promise<TransientStoreResult<void>> {
     this.store.set(key, {
       value,
       expiresAt: Date.now() + ttlSeconds * 1000,
     });
+    return { outcome: TransientStoreOutcome.FOUND };
   }
 
-  public async del(key: string): Promise<void> {
+  public async del(key: string): Promise<TransientStoreResult<void>> {
     this.store.delete(key);
+    return { outcome: TransientStoreOutcome.FOUND };
   }
 
   public async clear(): Promise<void> {
@@ -73,56 +98,104 @@ export class InMemoryTransientStore implements ITransientStore {
 
 /**
  * Production Redis adapter using ioredis.
- * Fails closed if connection cannot be established when refresh sessions are active.
+ * Fails closed if connection cannot be established or times out.
  */
 export class RedisTransientStore implements ITransientStore {
   private client: any; // ioredis Redis instance
-  private isConnected = false;
 
   constructor(redisClientOrUrl: any) {
     if (typeof redisClientOrUrl === "string") {
-      // Lazy load ioredis
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const IORedis = require("ioredis");
         this.client = new IORedis(redisClientOrUrl, {
-          maxRetriesPerRequest: 2,
-          connectTimeout: 5000,
+          maxRetriesPerRequest: 1,
+          connectTimeout: 2000,
+          commandTimeout: 2000,
+          enableOfflineQueue: false,
           lazyConnect: true,
         });
       } catch (err: unknown) {
-        throw new Error(`Failed to initialize Redis client: ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error(
+          `Failed to initialize Redis client: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     } else {
       this.client = redisClientOrUrl;
     }
   }
 
-  private async ensureConnected(): Promise<void> {
-    if (this.client && typeof this.client.connect === "function" && this.client.status === "wait") {
-      await this.client.connect();
-      this.isConnected = true;
+  private async ensureConnected(): Promise<boolean> {
+    if (!this.client) return false;
+    if (typeof this.client.connect === "function" && this.client.status === "wait") {
+      try {
+        await this.client.connect();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return this.client.status === "ready" || this.client.status === "connecting";
+  }
+
+  public async get(key: string): Promise<TransientStoreResult<string>> {
+    try {
+      const connected = await this.ensureConnected();
+      if (!connected && this.client?.status !== "ready") {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Redis not connected" };
+      }
+      const val = await this.client.get(key);
+      if (val === null || val === undefined) {
+        return { outcome: TransientStoreOutcome.NOT_FOUND };
+      }
+      return { outcome: TransientStoreOutcome.FOUND, value: val };
+    } catch (err: unknown) {
+      return {
+        outcome: TransientStoreOutcome.UNAVAILABLE,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
-  public async get(key: string): Promise<string | null> {
-    await this.ensureConnected();
-    return await this.client.get(key);
+  public async set(key: string, value: string, ttlSeconds: number): Promise<TransientStoreResult<void>> {
+    try {
+      const connected = await this.ensureConnected();
+      if (!connected && this.client?.status !== "ready") {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Redis not connected" };
+      }
+      await this.client.set(key, value, "EX", ttlSeconds);
+      return { outcome: TransientStoreOutcome.FOUND };
+    } catch (err: unknown) {
+      return {
+        outcome: TransientStoreOutcome.UNAVAILABLE,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
-  public async set(key: string, value: string, ttlSeconds: number): Promise<void> {
-    await this.ensureConnected();
-    await this.client.set(key, value, "EX", ttlSeconds);
-  }
-
-  public async del(key: string): Promise<void> {
-    await this.ensureConnected();
-    await this.client.del(key);
+  public async del(key: string): Promise<TransientStoreResult<void>> {
+    try {
+      const connected = await this.ensureConnected();
+      if (!connected && this.client?.status !== "ready") {
+        return { outcome: TransientStoreOutcome.UNAVAILABLE, error: "Redis not connected" };
+      }
+      await this.client.del(key);
+      return { outcome: TransientStoreOutcome.FOUND };
+    } catch (err: unknown) {
+      return {
+        outcome: TransientStoreOutcome.UNAVAILABLE,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   public async close(): Promise<void> {
     if (this.client && typeof this.client.quit === "function") {
-      await this.client.quit();
+      try {
+        await this.client.quit();
+      } catch {
+        this.client.disconnect();
+      }
     }
   }
 }
