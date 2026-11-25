@@ -33,6 +33,7 @@ import {
 } from "../src/repositories/postgres-identity-repository.js";
 import { SessionService } from "../src/repositories/session-service.js";
 import { EphemeralSuccessorVault } from "../src/auth/successor-vault.js";
+import { InMemoryTransientStore } from "../src/auth/transient-store.js";
 import { AuthErrorCode } from "../src/auth/errors.js";
 import { eq, inArray, sql } from "drizzle-orm";
 import { migrateLegacyIdentityUsers } from "../src/migrations/json-identity-migration.js";
