@@ -1,8 +1,8 @@
+import "dotenv/config";
 import express, { type Request, type Response } from "express";
 import http from "http";
 import cors from "cors";
-import dotenv from "dotenv";
-import { getAuthenticatedUser, generateToken } from "./auth.js";
+import { getAuthenticatedUser, generateToken, assertAuthConfig } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import {
@@ -14,11 +14,15 @@ import {
   getRoom
 } from "./roomManager.js";
 
-dotenv.config();
-
 const app = express();
 const port = process.env.PORT || 5000;
 
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
@@ -62,6 +66,14 @@ app.post("/api/livekit/token", async (req: Request, res: Response) => {
     }
     if (!roomName || roomName.length > 128) {
       return res.status(400).json({ error: "A valid meeting room is required." });
+    }
+
+    const existingRoom = getRoom(roomName);
+    if (existingRoom) {
+      const admission = checkAdmission(roomName, user.id);
+      if (admission.status !== "admitted") {
+        return res.status(403).json({ error: "You must be admitted to this meeting before joining media." });
+      }
     }
 
     const token = new AccessToken(apiKey, apiSecret, {
@@ -418,6 +430,8 @@ app.post("/api/room/:roomName/moderation/mute", async (req: Request, res: Respon
     return res.status(message.includes("Only the meeting host") ? 403 : 400).json({ error: message });
   }
 });
+
+assertAuthConfig();
 
 const server = http.createServer(app);
 

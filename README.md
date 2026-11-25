@@ -191,6 +191,18 @@ Open your browser at **`http://localhost:5173`** and launch your custom meeting!
 
 ---
 
+## 📚 Engineering Architecture & Roadmap
+
+For engineering documentation, security threat modeling, database design, and the production hardening roadmap, see [`docs/README.md`](docs/README.md):
+
+- [Current-State Repository Audit](docs/architecture/CURRENT_STATE_AUDIT.md)
+- [Target Architecture](docs/architecture/TARGET_ARCHITECTURE.md)
+- [Database Design](docs/architecture/DATABASE_DESIGN.md)
+- [Security Threat Model](docs/security/SECURITY_THREAT_MODEL.md)
+- [Implementation Roadmap](docs/roadmap/IMPLEMENTATION_ROADMAP.md)
+
+---
+
 ## 🤝 Contributing
 
 Contributions, feature suggestions, and feedback are welcome!

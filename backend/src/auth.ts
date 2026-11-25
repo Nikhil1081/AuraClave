@@ -2,7 +2,17 @@ import type { Request } from "express";
 import jwt from "jsonwebtoken";
 import { findUserById, type UserRecord } from "./db.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "auraclave-production-super-secret-key-2026";
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is required.");
+  }
+  return secret;
+}
+
+export function assertAuthConfig(): void {
+  getJwtSecret();
+}
 
 export interface AuthenticatedUser {
   id: string;
@@ -20,7 +30,7 @@ export function generateToken(user: UserRecord): string {
       email: user.email,
       fullName: user.fullName
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "30d" }
   );
 }
@@ -37,7 +47,7 @@ export async function getAuthenticatedUser(req: Request): Promise<AuthenticatedU
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as {
+    const payload = jwt.verify(token, getJwtSecret()) as {
       id: string;
       email: string;
       fullName?: string;

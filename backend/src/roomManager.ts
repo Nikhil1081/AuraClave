@@ -87,7 +87,7 @@ export function requestToJoin(
 
 export function checkAdmission(roomName: string, userId: string): { status: "admitted" | "waiting" | "rejected"; isHost: boolean } {
   const room = rooms.get(roomName);
-  if (!room) return { status: "admitted", isHost: false };
+  if (!room) return { status: "rejected", isHost: false };
 
   if (room.hostId === userId) return { status: "admitted", isHost: true };
   if (room.openToAll || !room.waitingRoomEnabled) return { status: "admitted", isHost: false };

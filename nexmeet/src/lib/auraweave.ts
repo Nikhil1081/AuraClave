@@ -188,9 +188,21 @@ export function useAuraWeave({
     // ---- Chat data handling with chunk reassembly ----
   const onData = (payload: Uint8Array, participant?: Participant) => {
     try {
+      if (payload.byteLength > 64_000) return;
       const message = JSON.parse(new TextDecoder().decode(payload));
+      if (!message || typeof message !== "object") return;
       // Chunked chat messages
-      if (message.type === "chat" && typeof message.chunkData !== "undefined") {
+      if (
+        message.type === "chat" &&
+        typeof message.chunkData === "string" &&
+        typeof message.id === "string" &&
+        Number.isInteger(message.totalChunks) &&
+        Number.isInteger(message.chunkIndex) &&
+        message.totalChunks > 0 &&
+        message.totalChunks <= 32 &&
+        message.chunkIndex >= 0 &&
+        message.chunkIndex < message.totalChunks
+      ) {
         const id = message.id;
         let entry = incomingChunksRef.current.get(id);
         if (!entry) {
@@ -203,39 +215,46 @@ export function useAuraWeave({
           const fullStr = entry.chunks.join("");
           try {
             const fullMsg = JSON.parse(fullStr);
-            setChatMessages((prev) => [
-              ...prev,
-              {
-                id: fullMsg.id,
-                peerId: participant?.identity || "",
-                senderName: participant?.name || "Participant",
-                senderAvatar: "",
-                text: fullMsg.text,
-                time: fullMsg.time,
-                isSelf: false
-              }
-            ]);
+            if (typeof fullMsg?.text === "string" && fullMsg.text.length <= 4000) {
+              setChatMessages((prev) => [
+                ...prev,
+                {
+                  id: String(fullMsg.id || id),
+                  peerId: participant?.identity || "",
+                  senderName: participant?.name || "Participant",
+                  senderAvatar: "",
+                  text: fullMsg.text,
+                  time: String(fullMsg.time || ""),
+                  isSelf: false
+                }
+              ]);
+            }
           } catch {}
           incomingChunksRef.current.delete(id);
         }
         return; // done handling chunked message
       }
       // Non‑chunked or other message types
-      if (message.type === "chat") {
+      if (message.type === "chat" && typeof message.text === "string" && message.text.length <= 4000) {
         setChatMessages((previous) => [
           ...previous,
           {
-            id: message.id,
+            id: String(message.id || `${Date.now()}`),
             peerId: participant?.identity || "",
             senderName: participant?.name || "Participant",
             senderAvatar: "",
             text: message.text,
-            time: message.time,
+            time: String(message.time || ""),
             isSelf: false
           }
         ]);
-      } else if (message.type === "caption") {
-        onCaptionReceivedRef.current?.(message.speaker, message.text);
+      } else if (
+        message.type === "caption" &&
+        typeof message.speaker === "string" &&
+        typeof message.text === "string" &&
+        message.text.length <= 2000
+      ) {
+        onCaptionReceivedRef.current?.(message.speaker.slice(0, 120), message.text);
       } else if (message.type === "hand") {
         const handUser: HandRaisedUser = {
           peerId: participant?.identity || "",
@@ -244,11 +263,11 @@ export function useAuraWeave({
           avatarUrl: ""
         };
         setHandsRaised((previous) =>
-          message.raised
+          Boolean(message.raised)
             ? [...previous.filter((item) => item.peerId !== handUser.peerId), handUser]
             : previous.filter((item) => item.peerId !== handUser.peerId)
         );
-      } else if (message.type === "reaction" && typeof message.emoji === "string") {
+      } else if (message.type === "reaction" && typeof message.emoji === "string" && message.emoji.length <= 16) {
         const reaction = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           emoji: message.emoji,
