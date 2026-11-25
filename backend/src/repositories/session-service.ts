@@ -99,7 +99,7 @@ export class SessionService {
 
     // 1. Check for valid idempotent retry in ephemeral encrypted vault (Redis/shared cache acceleration)
     if (params.idempotencyKey) {
-      const cached = await this.successorVault.retrieveSuccessor(
+      const cached = await this.successorVault.retrieveSuccessorWithOutcome(
         presentedHash,
         params.idempotencyKey
       );

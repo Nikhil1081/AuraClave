@@ -101,9 +101,22 @@ export class EphemeralSuccessorVault {
   }
 
   /**
-   * Retrieves and decrypts the cached successor from the transient store with typed outcomes.
+   * Retrieves and decrypts the cached successor from the transient store.
+   * Returns CachedSuccessorPayload on success, or null on miss/tamper/expired/unavailable.
+   * Also attaches the typed outcome on the returned object or exposes retrieveSuccessorWithOutcome.
    */
   public async retrieveSuccessor(
+    presentedTokenHash: string,
+    idempotencyKey: string
+  ): Promise<CachedSuccessorPayload | null> {
+    const res = await this.retrieveSuccessorWithOutcome(presentedTokenHash, idempotencyKey);
+    return res.outcome === "FOUND" ? res.payload : null;
+  }
+
+  /**
+   * Retrieves and decrypts the cached successor from the transient store with typed outcomes.
+   */
+  public async retrieveSuccessorWithOutcome(
     presentedTokenHash: string,
     idempotencyKey: string
   ): Promise<VaultRetrievalOutcome> {
