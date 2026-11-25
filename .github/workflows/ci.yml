@@ -11,9 +11,28 @@ jobs:
     name: Build, Lint & Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: auraclave
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: auraclave_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auraclave -d auraclave_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
+      CI: "true"
       JWT_SECRET: ci-test-secret-do-not-use-in-production
       PORT: 5000
+      DATABASE_URL: postgresql://auraclave:ci-test-only@localhost:5432/auraclave_test
+      TEST_DATABASE_URL: postgresql://auraclave:ci-test-only@localhost:5432/auraclave_test
+      DATABASE_SSL: disable
 
     steps:
       - name: Checkout repository
@@ -29,6 +48,9 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend install
 
+      - name: Run database migrations
+        run: npm --prefix backend run db:migrate
+
       - name: Build backend (TypeScript)
         run: npm --prefix backend run build
 
@@ -40,7 +62,7 @@ jobs:
         env:
           VITE_API_URL: http://localhost:5000
 
-      - name: Run backend tests
+      - name: Run backend tests (PostgreSQL integration required)
         run: npm --prefix backend test
 
       - name: Run frontend tests

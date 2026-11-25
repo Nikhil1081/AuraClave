@@ -6,9 +6,9 @@
 import type { Request, Response } from 'express';
 
 export function rootHealthHandler(_req: Request, res: Response): void {
-  res.json({ status: 'ok', service: 'AuraClave API', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: 'ok', service: 'AuraClave API', timestamp: new Date().toISOString() });
 }
 
 export function healthHandler(_req: Request, res: Response): void {
-  res.json({ status: 'healthy' });
+  res.status(200).json({ status: 'healthy' });
 }

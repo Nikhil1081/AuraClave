@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "auth_sessions_replaced_by_session_unique" ON "auth_sessions" USING btree ("replaced_by_session_id");--> statement-breakpoint
+ALTER TABLE "auth_audit_events" ADD CONSTRAINT "auth_audit_events_metadata_object_and_size" CHECK (jsonb_typeof("auth_audit_events"."metadata") = 'object' and octet_length("auth_audit_events"."metadata"::text) <= 4096);

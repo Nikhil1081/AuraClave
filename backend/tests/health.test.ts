@@ -1,6 +1,5 @@
-import request from 'supertest';
-import express from 'express';
-import { describe, it, expect } from 'vitest';
+import type { Request, Response } from 'express';
+import { describe, it, expect, vi } from 'vitest';
 import { rootHealthHandler, healthHandler } from '../src/lib/health.js';
 
 /**
@@ -16,22 +15,37 @@ import { rootHealthHandler, healthHandler } from '../src/lib/health.js';
  * Limitation: middleware (security headers, CORS, body-parser) is not tested here.
  * Integration tests covering the full server are planned for M1.1+.
  */
-const testApp = express();
-testApp.get('/', rootHealthHandler);
-testApp.get('/health', healthHandler);
+function createResponseMock() {
+  let response: Response;
+  const status = vi.fn(() => response);
+  const json = vi.fn((_body?: unknown) => response);
+  response = { status, json } as unknown as Response;
+  return { response, status, json };
+}
 
 describe('Production health handlers', () => {
   it('GET /health returns { status: "healthy" }', async () => {
-    const response = await request(testApp).get('/health');
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: 'healthy' });
+    const { response, status, json } = createResponseMock();
+    healthHandler({} as Request, response);
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({ status: 'healthy' });
   });
 
   it('GET / returns { status: "ok", service: "AuraClave API" }', async () => {
-    const response = await request(testApp).get('/');
-    expect(response.status).toBe(200);
-    expect(response.body.status).toBe('ok');
-    expect(response.body.service).toBe('AuraClave API');
-    expect(typeof response.body.timestamp).toBe('string');
+    const { response, status, json } = createResponseMock();
+    rootHealthHandler({} as Request, response);
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        service: 'AuraClave API',
+        timestamp: expect.any(String)
+      })
+    );
+    const body = json.mock.calls[0]?.[0];
+    if (!body || typeof body !== 'object' || !('timestamp' in body)) {
+      throw new Error('The root health response must include a timestamp.');
+    }
+    expect(typeof body.timestamp).toBe('string');
   });
 });
