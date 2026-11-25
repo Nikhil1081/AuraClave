@@ -11,8 +11,9 @@
 | Check | Result |
 |-------|--------|
 | Current branch | `feature/milestone-1-foundation` ✅ |
-| Local HEAD matches remote | ✅ Both `04f24c3c020ce6f388d84c6dc664d87a9aae17e2` |
-| Ahead / behind | `0 / 0` commits at synchronization |
+| M1.0 implementation / CI commit | `93a0b4a81e55d3903ccb15a2aa2a06c4e3a1265c` |
+| Push confirmation | ✅ Implementation commit pushed to `origin/feature/milestone-1-foundation` |
+| GitHub Actions run | ✅ `45574049244` — completed successfully for the commit above |
 | Remote branch | `origin/feature/milestone-1-foundation` |
 
 **Uncommitted `nexmeet` changes present before this verification (preserved):**
@@ -25,9 +26,9 @@ modified: nexmeet/src/pages/Meeting.tsx
 ```
 
 > [!IMPORTANT]
-> These 5 files are intentionally NOT committed in M1.0. They are pre-existing user changes unrelated to the engineering baseline.
+> These 5 pre-existing files were intentionally excluded from the M1.0 commits and remain untouched.
 
-JWT validation and CI corrections in this report are local worktree changes and have not been committed or pushed.
+The M1.0 implementation and CI corrections are committed and pushed. This report is updated in a separate documentation-only commit after the successful CI run.
 
 ---
 
@@ -70,6 +71,8 @@ The test **imports the same handler functions** used by production server.ts. A 
 
 **JWT missing in any environment:** ✅ Fails startup before the server listens.
 
+**Production startup smoke test:** ✅ With `NODE_ENV=production` and no `JWT_SECRET`, the built server exited with code 1 and the expected required-secret error.
+
 **Secret source:** ✅ Supplied via environment. Local development uses a private value in `backend/.env`; production uses a stable deployment secret. `backend/.env.example` is a template only.
 
 **Tests:** ✅ Use a dedicated test secret; missing-secret validation is covered by `backend/tests/env.test.ts`.
@@ -88,10 +91,10 @@ The test **imports the same handler functions** used by production server.ts. A 
 | Build frontend | `npm --prefix nexmeet run build` | ✅ script: `"build": "tsc -b && vite build"` |
 | Backend tests | `npm --prefix backend test` | ✅ script: `"test": "vitest run"` |
 | Frontend tests | Skips if no `test` script; fails CI if tests fail | ✅ No frontend test files or `test` script currently exist |
-| Dependency audit | `npm --prefix backend audit --audit-level=high` | ✅ `continue-on-error: true` |
-| Secret scan | TruffleHog `--only-verified` | ✅ `continue-on-error: true` |
+| Dependency audit | `npm --prefix backend audit --audit-level=high` | ✅ Step completed; reports findings listed under known warnings |
+| Secret scan | TruffleHog `--only-verified` over the event commit range | ✅ Step completed; 0 verified and 0 unverified secrets |
 
-**Remote GitHub Actions status:** ✅ `gh run list` showed three successful runs for the feature branch; latest run `45571705604` completed successfully for remote commit `04f24c3`. The local workflow change removing `continue-on-error` has not been pushed or run remotely.
+**Remote GitHub Actions status:** ✅ Run `45574049244` completed successfully for commit `93a0b4a81e55d3903ccb15a2aa2a06c4e3a1265c`. Backend and frontend dependency installation, backend build, frontend build, backend tests, frontend test handling, and TruffleHog all completed successfully. The backend audit ran with non-blocking vulnerability findings listed below.
 
 ---
 
@@ -129,7 +132,7 @@ Exit code: 0 ✅
 ### Frontend tests
 ```
 No test script in nexmeet/package.json.
-Result: Skipped — 0 tests exist. Not a regression.
+CI result: Skipped as configured — no frontend test files or test script exist.
 ```
 
 ---
@@ -160,7 +163,10 @@ Result: Skipped — 0 tests exist. Not a regression.
 | Broad CORS (`origin: true`) | Active — restrict before production |
 | No middleware-level integration tests | Active — deferred to M1.1+ |
 | Frontend chunk size > 500KB | Pre-existing warning; not introduced by M1.0 |
-| Updated workflow run | Pending — local CI step change is not pushed; existing remote run passed before that change |
+| Dependency audit findings | CI reported 6 backend vulnerabilities (3 moderate, 1 high, 2 critical) and 9 frontend vulnerabilities (5 moderate, 4 high); the backend audit is non-blocking in this workflow |
+| Node.js engine warnings | CI uses Node 20 while some installed frontend dependencies declare Node >=22; builds passed despite `EBADENGINE` warnings |
+| GitHub Actions runtime warning | GitHub reported that `actions/checkout@v4` and `actions/setup-node@v4` target deprecated Node 20 action runtimes |
+| TruffleHog scan | Passed on the event commit range with 0 verified and 0 unverified findings |
 
 ---
 
@@ -176,19 +182,17 @@ Result: Skipped — 0 tests exist. Not a regression.
 | No hardcoded/generated JWT fallback; missing secret blocks startup | ✅ |
 | Backend tests pass (4/4, including JWT env validation) | ✅ |
 | Health tests exercise production handler code | ✅ (after fix) |
-| CI workflow syntactically correct + commands verified | ✅ |
-| CI frontend test step skips only when script is absent and fails on test failure | ✅ locally inspected; updated workflow run pending |
+| CI workflow and frontend test handling verified remotely | ✅ |
 | Backend build exits 0 | ✅ |
 | Frontend build exits 0 | ✅ |
 | No M1.1 work started | ✅ |
-| No unrelated user changes committed | ✅ |
-| No destructive git commands executed | ✅ |
-| GitHub Actions run confirmed passing for current uncommitted changes | ⏳ Cannot be verified until the changes are pushed and CI runs |
+| Pre-existing `nexmeet` changes excluded from commits | ✅ |
+| GitHub Actions run confirmed passing for M1.0 implementation commit | ✅ Run `45574049244`, SHA `93a0b4a81e55d3903ccb15a2aa2a06c4e3a1265c` |
 
 ---
 
 ## Conclusion
 
-**M1.0 code and local checks pass:** backend build, frontend build, and all four backend tests succeeded; the existing remote CI run for `04f24c3` passed. The updated frontend-test failure handling has not yet been exercised by GitHub Actions because these local changes were not pushed. No M1.1 work has started.
+**M1.0 is COMPLETE.** The implementation commit was pushed and its GitHub Actions run (`45574049244`) succeeded. Backend build and all four backend tests passed; the frontend build passed; frontend test handling skipped only because no tests or script exist. TruffleHog completed with no verified or unverified findings. Dependency audit and Node engine/runtime warnings are recorded above. No M1.1 work has started.
 
-**M1.1 remains gated** until the current changes are authorized for push and the resulting GitHub Actions run is confirmed green.
+**M1.1 has not been started.**
