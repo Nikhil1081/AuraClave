@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import bcrypt from "bcryptjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabaseConnection, type IdentityDatabase } from "../src/database/client.js";
@@ -11,6 +12,7 @@ import {
   users,
 } from "../src/database/schema.js";
 import { checkDatabaseHealth } from "../src/database/health.js";
+import { verifyPassword } from "../src/db.js";
 import {
   consumeEmailVerificationToken,
   consumePasswordResetToken,
@@ -27,7 +29,8 @@ import {
   revokeAuthSession,
   updateIdentityUserProfile,
 } from "../src/repositories/postgres-identity-repository.js";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import { migrateLegacyIdentityUsers } from "../src/migrations/json-identity-migration.js";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const isCi = process.env.CI === "true";
@@ -220,5 +223,254 @@ describe.skipIf(!testDatabaseUrl && !isCi)("PostgreSQL identity repository", () 
     expect(auditEventAfterUserDeletion.userId).toBeNull();
     await db.delete(authAuditEvents).where(eq(authAuditEvents.id, auditEvent.id));
     auditEventId = undefined;
+  });
+
+  it("reconciles JSON identities, preserves source fields, and rolls back failed batches", async () => {
+    if (!database) {
+      throw new Error("PostgreSQL integration test connection was not initialized.");
+    }
+
+    const db = database;
+    const firstId = randomUUID();
+    const secondId = randomUUID();
+    const passwordHash = await bcrypt.hash("migration-preparation-test-only", 4);
+    const createdAt = "2024-02-03T04:05:06.000Z";
+    const sourceUsers = [
+      {
+        id: firstId,
+        email: `  Migration-${firstId}@Example.Test `,
+        passwordHash,
+        fullName: "Migration User One",
+        createdAt,
+      },
+      {
+        id: secondId,
+        email: `migration-${secondId}@example.test`,
+        passwordHash,
+        fullName: "Migration User Two",
+        avatarUrl: "https://example.test/avatar.png",
+        createdAt,
+      },
+    ];
+
+    try {
+      const firstDryRun = await migrateLegacyIdentityUsers(sourceUsers, db);
+      const repeatedDryRun = await migrateLegacyIdentityUsers(sourceUsers, db);
+      expect(firstDryRun).toMatchObject({
+        status: "ready",
+        sourceTotal: 2,
+        validRecords: 2,
+        plannedInserts: 2,
+        inserted: 0,
+        rejected: 0,
+        conflicting: 0,
+      });
+      expect(repeatedDryRun).toMatchObject({ status: "ready", plannedInserts: 2, inserted: 0 });
+      expect(JSON.stringify(firstDryRun)).not.toContain(passwordHash);
+      expect(await db.select().from(users).where(inArray(users.id, [firstId, secondId]))).toHaveLength(0);
+
+      const applied = await migrateLegacyIdentityUsers(sourceUsers, db, { apply: true });
+      expect(applied).toMatchObject({ status: "completed", plannedInserts: 2, inserted: 2 });
+      expect(JSON.stringify(applied)).not.toContain(passwordHash);
+
+      const migrated = await db.select().from(users).where(inArray(users.id, [firstId, secondId]));
+      expect(migrated).toHaveLength(2);
+      const first = migrated.find((user) => user.id === firstId);
+      expect(first).toMatchObject({
+        id: firstId,
+        email: `migration-${firstId}@example.test`,
+        fullName: "Migration User One",
+        avatarUrl: null,
+        status: "active",
+        emailVerifiedAt: null,
+        lastLoginAt: null,
+      });
+      expect(first?.passwordHash === passwordHash).toBe(true);
+      expect(await verifyPassword("migration-preparation-test-only", first?.passwordHash ?? "")).toBe(true);
+      expect(first?.createdAt.toISOString()).toBe(createdAt);
+      expect(migrated.find((user) => user.id === secondId)?.avatarUrl).toBe(
+        "https://example.test/avatar.png",
+      );
+
+      const repeatedApply = await migrateLegacyIdentityUsers(sourceUsers, db, { apply: true });
+      expect(repeatedApply).toMatchObject({
+        status: "completed",
+        alreadyMigrated: 2,
+        plannedInserts: 0,
+        inserted: 0,
+      });
+
+      const duplicateSource = [
+        { ...sourceUsers[0], id: randomUUID() },
+        { ...sourceUsers[1], id: randomUUID(), email: sourceUsers[0].email.toUpperCase() },
+      ];
+      const duplicateReport = await migrateLegacyIdentityUsers(duplicateSource, db, { apply: true });
+      expect(duplicateReport.status).toBe("blocked");
+      expect(duplicateReport.duplicateNormalizedEmails).toHaveLength(1);
+      expect(duplicateReport.inserted).toBe(0);
+      expect(duplicateReport.rejected).toBe(2);
+
+      const malformedReport = await migrateLegacyIdentityUsers(
+        [{ ...sourceUsers[0], id: "invalid-id" }],
+        db,
+        { apply: true },
+      );
+      expect(malformedReport.status).toBe("blocked");
+      expect(malformedReport.malformedRecords).toHaveLength(1);
+      expect(malformedReport.inserted).toBe(0);
+      expect(malformedReport.rejected).toBe(1);
+
+      const conflictId = randomUUID();
+      const conflictEmail = `migration-conflict-${conflictId}@example.test`;
+      const conflictingTarget = await createIdentityUser(
+        {
+          email: conflictEmail,
+          passwordHash,
+          fullName: "Existing Target User",
+        },
+        db,
+      );
+      try {
+        const conflictReport = await migrateLegacyIdentityUsers(
+          [{
+            ...sourceUsers[0],
+            id: conflictId,
+            email: conflictEmail.toUpperCase(),
+          }],
+          db,
+          { apply: true },
+        );
+        expect(conflictReport).toMatchObject({
+          status: "blocked",
+          inserted: 0,
+          conflicting: 1,
+          targetConflicts: [{
+            reason: "email_exists_with_different_user",
+            conflictingUserId: conflictingTarget.id,
+            conflictingFields: ["id"],
+          }],
+        });
+        expect(await db.select().from(users).where(eq(users.id, conflictingTarget.id))).toHaveLength(1);
+      } finally {
+        await db.delete(users).where(eq(users.id, conflictingTarget.id));
+      }
+
+      const passwordConflictId = randomUUID();
+      const passwordConflictEmail = `migration-password-conflict-${passwordConflictId}@example.test`;
+      const originalPasswordHash = await bcrypt.hash("migration-existing-password-only", 4);
+      const changedPasswordHash = await bcrypt.hash("migration-source-password-only", 4);
+      const passwordConflictTarget = await createIdentityUser(
+        {
+          id: passwordConflictId,
+          email: passwordConflictEmail,
+          passwordHash: originalPasswordHash,
+          fullName: "Migration User One",
+          createdAt: new Date(createdAt),
+          updatedAt: new Date(createdAt),
+        },
+        db,
+      );
+      try {
+        const passwordConflictReport = await migrateLegacyIdentityUsers(
+          [{
+            ...sourceUsers[0],
+            id: passwordConflictId,
+            email: passwordConflictEmail,
+            passwordHash: changedPasswordHash,
+          }],
+          db,
+          { apply: true },
+        );
+        expect(passwordConflictReport).toMatchObject({
+          status: "blocked",
+          inserted: 0,
+          conflicting: 1,
+          targetConflicts: [{
+            reason: "user_id_exists_with_different_data",
+            conflictingFields: ["passwordHash"],
+          }],
+        });
+        const [unchangedPassword] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, passwordConflictTarget.id));
+        expect(unchangedPassword.passwordHash === originalPasswordHash).toBe(true);
+      } finally {
+        await db.delete(users).where(eq(users.id, passwordConflictTarget.id));
+      }
+
+      const uuidConflictId = randomUUID();
+      const uuidConflictTarget = await createIdentityUser(
+        {
+          id: uuidConflictId,
+          email: `migration-existing-${uuidConflictId}@example.test`,
+          passwordHash,
+          fullName: "Migration User One",
+          createdAt: new Date(createdAt),
+          updatedAt: new Date(createdAt),
+        },
+        db,
+      );
+      try {
+        const uuidConflictReport = await migrateLegacyIdentityUsers(
+          [{
+            ...sourceUsers[0],
+            id: uuidConflictId,
+            email: `migration-new-${uuidConflictId}@example.test`,
+          }],
+          db,
+          { apply: true },
+        );
+        expect(uuidConflictReport).toMatchObject({
+          status: "blocked",
+          inserted: 0,
+          conflicting: 1,
+          targetConflicts: [{
+            reason: "user_id_exists_with_different_data",
+            conflictingFields: ["email"],
+          }],
+        });
+        expect(await db.select().from(users).where(eq(users.id, uuidConflictTarget.id))).toHaveLength(1);
+      } finally {
+        await db.delete(users).where(eq(users.id, uuidConflictTarget.id));
+      }
+
+      const rollbackFirstId = randomUUID();
+      const rollbackSecondId = randomUUID();
+      const rollbackUsers = [
+        {
+          ...sourceUsers[0],
+          id: rollbackFirstId,
+          email: `rollback-first-${rollbackFirstId}@example.test`,
+        },
+        {
+          ...sourceUsers[1],
+          id: rollbackSecondId,
+          email: `rollback-fail-${rollbackSecondId}@example.test`,
+        },
+      ];
+
+      try {
+        await db.execute(sql`
+          ALTER TABLE users
+          ADD CONSTRAINT json_identity_migration_rollback_check
+          CHECK (email NOT LIKE 'rollback-fail-%@example.test')
+        `);
+
+        const failedBatch = await migrateLegacyIdentityUsers(rollbackUsers, db, { apply: true });
+        expect(failedBatch).toMatchObject({ status: "failed", failureCode: "23514", inserted: 0 });
+        expect(
+          await db
+            .select()
+            .from(users)
+            .where(inArray(users.id, [rollbackFirstId, rollbackSecondId])),
+        ).toHaveLength(0);
+      } finally {
+        await db.execute(sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS json_identity_migration_rollback_check`);
+        await db.delete(users).where(inArray(users.id, [rollbackFirstId, rollbackSecondId]));
+      }
+    } finally {
+      await db.delete(users).where(inArray(users.id, [firstId, secondId]));
+    }
   });
 });
