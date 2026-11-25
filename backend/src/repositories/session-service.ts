@@ -247,7 +247,7 @@ export class SessionService {
           });
 
           throw new AuthError(
-            AuthErrorCode.AUTH_DATABASE_UNAVAILABLE,
+            AuthErrorCode.INTERNAL_AUTH_FAILURE,
             "Stored retry record integrity failure. Family not revoked."
           );
         }

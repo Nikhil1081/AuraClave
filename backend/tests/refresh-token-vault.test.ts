@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import crypto from "crypto";
 import { generateOpaqueRefreshToken, hashRefreshToken } from "../src/auth/refresh-token.js";
-import { EphemeralSuccessorVault } from "../src/auth/successor-vault.js";
+import {
+  EphemeralSuccessorVault,
+  createSuccessorVaultFromConfig,
+} from "../src/auth/successor-vault.js";
 import { InMemoryTransientStore } from "../src/auth/transient-store.js";
+import {
+  encryptPayload,
+  decryptPayload,
+  parseEncryptionKey,
+} from "../src/auth/crypto.js";
 
 describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => {
   it("generates opaque refresh tokens with 256 bits of entropy and SHA-256 digests", () => {
@@ -148,10 +156,8 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
     const retrieved = await vault.retrieveSuccessor("any-hash", "any-key");
     expect(retrieved).toBeNull(); // Fails closed without throwing or crashing API
   });
-});
 
   it("proves production configuration fails closed when required infrastructure is absent", () => {
-    const { createSuccessorVaultFromConfig } = require("../src/auth/successor-vault.js");
     expect(() =>
       createSuccessorVaultFromConfig({
         NODE_ENV: "production",
@@ -168,12 +174,7 @@ describe("M1.4.4 Refresh Token Generation & Distributed Successor Vault", () => 
       })
     ).toThrow(/Invalid encryption key encoding/);
   });
-import { describe, expect, it } from "vitest";
-import {
-  encryptPayload,
-  decryptPayload,
-  parseEncryptionKey,
-} from "../src/auth/crypto.js";
+});
 
 describe("M1.4 Cryptographic Key Parsing and AES-256-GCM Integrity", () => {
   it("parses valid 64-character hex keys into exactly 32 bytes", () => {
