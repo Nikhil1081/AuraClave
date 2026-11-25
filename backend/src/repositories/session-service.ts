@@ -206,16 +206,11 @@ export class SessionService {
             );
           }
 
-          // AAD binding verification: tokenHash + familyId + idempotencyKey
-          const aad = this.successorVault.constructAAD(
+          const recovered = this.successorVault.decryptPayload(
+            tokenRecord.encryptedSuccessorPayload,
             presentedHash,
             family.id,
             params.idempotencyKey
-          );
-
-          const recovered = this.successorVault.decryptPayload(
-            tokenRecord.encryptedSuccessorPayload,
-            aad
           );
 
           if (recovered) {
