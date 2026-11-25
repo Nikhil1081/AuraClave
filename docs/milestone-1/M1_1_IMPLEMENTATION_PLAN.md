@@ -48,7 +48,7 @@
 
 - The web client is deployed separately from the Render API. Cookie authentication requires explicit credentialed CORS and CSRF controls. The current Firebase web origin and Render API origin are cross-site; browser third-party-cookie restrictions may prevent a cross-site refresh cookie from working. Validate the production domains and browser policy before enabling cookie sessions; a same-site custom domain or reverse proxy may be required.
 - There is no configured email delivery provider in the inspected code or backend dependencies. Token persistence can be implemented independently, but production email verification/password recovery cannot be declared operational until a delivery provider and secrets are configured.
-- Database integration tests need an isolated PostgreSQL instance; never point tests or migrations at production. The workflow now provisions a disposable PostgreSQL service, but that workflow change has not run remotely yet.
+- Database integration tests need an isolated PostgreSQL instance; never point tests or migrations at production. The workflow provisions a disposable PostgreSQL service; the actual run result is recorded below.
 
 ### Database-foundation implementation status
 
@@ -56,10 +56,12 @@
 - Added Drizzle schema and generated migrations for `users`, `auth_sessions`, `email_verification_tokens`, `password_reset_tokens`, and `auth_audit_events`, including `last_login_at`, case-insensitive unique email, token-hash uniqueness, session rotation linkage, foreign keys, checks, and lookup/expiry/audit indexes. The repository stores canonical lowercase email in `users.email`; a second duplicate normalized-email column is intentionally not used.
 - Added a typed PostgreSQL identity repository. The active auth routes and JSON repository are unchanged; no production traffic or authentication behavior has been switched.
 - The PostgreSQL integration test runs the Drizzle migrator, verifies connectivity, normalized-email uniqueness, user/session/token/audit operations, foreign-key rejection, cascade deletion, and audit `SET NULL` behavior. It is skipped when run locally without a test URL, but it is required in CI: the workflow sets `CI=true` and `TEST_DATABASE_URL`, and the test fails rather than skips if either CI configuration is incomplete.
-- CI provisions PostgreSQL 16 and runs `drizzle-kit migrate` before the backend tests. The integration test also invokes the migrator, making its database setup self-contained. No remote workflow has exercised these changes because the work remains uncommitted and unpushed.
+- CI provisions PostgreSQL 16 and runs `drizzle-kit migrate` before the backend tests. The integration test also invokes the migrator, making its database setup self-contained. Workflow run [45579314717](https://github.com/Nikhil1081/AuraClave/actions/runs/45579314717) on commit `f58087c11b2ceef58fa05cfa5285ebd8e806d1d6` completed successfully: the PostgreSQL service became healthy, migrations applied, the integration test ran (1/1 passed, not skipped), all 9 backend tests passed, backend and frontend builds passed, and TruffleHog secret scanning passed with zero verified secrets.
+- The first CI run, [45578925363](https://github.com/Nikhil1081/AuraClave/actions/runs/45578925363), found that Drizzle wraps PostgreSQL constraint errors and the integration test was checking SQLSTATE at the wrong level. The test now asserts `cause.code` for duplicate and foreign-key errors; the succeeding run above verified those checks against PostgreSQL.
+- The backend dependency audit reports 9 vulnerabilities (6 moderate, 1 high, 2 critical). The workflow marks this audit `continue-on-error`, so the CI run succeeds; this is a known warning, not a clean audit result. The frontend test step reports there is no frontend test script and skips it as configured.
 - Health handler tests now invoke the same production handler functions directly with response mocks, avoiding unnecessary Supertest TCP listeners while retaining explicit HTTP status and response-body assertions. The production endpoints still return HTTP 200 with the same payloads.
-- Latest local verification: backend build passed; complete backend test suite passed (8 tests); database configuration tests passed (4 tests); database/health test TypeScript checks passed; `drizzle-kit generate` reported no pending schema changes and `drizzle-kit check` passed. The PostgreSQL integration test was skipped because no local test URL/service is available; migrations have not been applied to PostgreSQL here. No GitHub Actions run exists for these uncommitted changes.
-- The database foundation is not yet accepted. Do not advance to authentication work until an actual PostgreSQL integration run succeeds in a PostgreSQL environment; CI must also run against this exact change set before acceptance.
+- Local verification before CI: backend build passed; complete backend tests passed (8 passed, PostgreSQL integration skipped locally); database configuration tests passed (4); database/health test TypeScript checks passed; `drizzle-kit generate` reported no pending schema changes and `drizzle-kit check` passed. Local PostgreSQL was unavailable, so live DB verification was completed by the disposable CI service instead.
+- **PostgreSQL foundation verification gate: passed** by the successful CI run above. This does not implement or authorize authentication migration or production cutover; the JSON identity store remains active and subsequent M1.1 phases remain separate.
 
 ## 2. Implementation sequence
 
@@ -85,7 +87,7 @@
 5. [x] Add Drizzle Kit configuration, generated migrations, migration scripts, and a typed repository layer. Keep the existing JSON module and API imports unchanged for now; name/document the PostgreSQL repository distinctly so there is one new SQL implementation rather than an accidental replacement or hidden dual-write.
 6. [x] Add a database connectivity check and tests for configuration/repository behavior. Configure a disposable PostgreSQL CI service for required integration tests. Do not provision production resources from this workspace.
 
-**Exit:** schema and migration generate cleanly; PostgreSQL integration tests pass against a disposable database; backend build and existing tests pass; the running auth API still uses JSON. **Pending:** actual PostgreSQL integration execution and a successful full backend test run.
+**Exit:** schema and migration generate cleanly; PostgreSQL integration test passes against disposable PostgreSQL 16; backend build and all backend tests pass; frontend build passes; the running auth API still uses JSON. **Verified** by workflow run 45579314717. The local integration test remains skipped solely because no local DB service is configured.
 
 ### Phase 3 — Idempotent JSON migration utility
 
@@ -151,7 +153,7 @@
 
 ## 4. Current blockers and non-goals
 
-- **Local PostgreSQL integration tests:** unavailable because neither `DATABASE_URL`/`TEST_DATABASE_URL`, a PostgreSQL executable/service, nor Docker is configured. CI is configured with a disposable PostgreSQL 16 service, but its run remains unverified until the branch is pushed or tested elsewhere. Do not substitute production credentials.
+- **Local PostgreSQL integration tests:** unavailable because neither `DATABASE_URL`/`TEST_DATABASE_URL`, a PostgreSQL executable/service, nor Docker is configured. The required integration test passed on disposable PostgreSQL 16 in CI run 45579314717. Do not substitute production credentials.
 - **Managed database provisioning:** no provider/resource or connection secret is configured in this workspace. The foundation can be implemented without it; deployment/cutover cannot.
 - **Email delivery:** no provider is present. Production verification and recovery delivery require a configured provider before those flows can be accepted.
 - **Web cookie deployment:** Firebase and Render are currently separate origins; cross-site cookie support must be confirmed or deployment domains adjusted before web cutover.
