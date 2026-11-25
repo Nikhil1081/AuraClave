@@ -44,7 +44,13 @@ jobs:
         run: npm --prefix backend test
 
       - name: Run frontend tests
-        run: npm --prefix nexmeet run test -- --run
+        # nexmeet has no test script yet; skip gracefully until tests are added
+        run: |
+          if npm --prefix nexmeet run 2>&1 | grep -q '"test"'; then
+            npm --prefix nexmeet run test -- --run
+          else
+            echo "No frontend test script defined. Skipping."
+          fi
         continue-on-error: true
 
       - name: Dependency vulnerability audit (backend)

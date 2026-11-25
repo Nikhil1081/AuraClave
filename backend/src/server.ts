@@ -4,6 +4,7 @@ validateEnvConfig();
 import express, { type Request, type Response } from "express";
 import http from "http";
 import cors from "cors";
+import { rootHealthHandler, healthHandler } from "./lib/health.js";
 import { getAuthenticatedUser, generateToken, assertAuthConfig } from "./auth.js";
 import { createUser, findUserByEmail, verifyPassword, updateUserProfile } from "./db.js";
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
@@ -29,14 +30,10 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-// Health check endpoint for Render
-app.get("/", (_req: Request, res: Response) => {
-  res.json({ status: "ok", service: "AuraClave API", timestamp: new Date().toISOString() });
-});
+// Health check endpoints for Render / load balancers
+app.get("/", rootHealthHandler);
 
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy" });
-});
+app.get("/health", healthHandler);
 
 function getLiveKitRoomService(): RoomServiceClient {
   const livekitUrl = process.env.LIVEKIT_URL;
